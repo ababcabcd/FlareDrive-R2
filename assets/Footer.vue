@@ -15,9 +15,9 @@
       </a>
     </div>
 
-`    <div class="stats">
+    <div v-if="false" class="stats">
       访问次数：<span id="vercount_value_site_pv">😯</span>次 | 访客人数：<span id="vercount_value_site_uv">😯</span>人
-    </div>`
+    </div>
 
     <div class="project-links">
       <strong>项目:</strong><a href="https://github.com/willow-god/FlareDrive-R2" target="_blank"
