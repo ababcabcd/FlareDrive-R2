@@ -153,14 +153,14 @@ button.circle {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgb(57, 144, 155);
+  background-color: rgb(255, 255, 255);
   cursor: pointer;
   box-shadow: 2px 4px 6px rgba(0, 0, 0, 0.3);
 }
 
 .upload-button {
   right: 30px;
-  bottom: 16px;
+  bottom: 50px;
 }
 
 .create-folder-button {
