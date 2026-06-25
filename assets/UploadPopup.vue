@@ -74,7 +74,7 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
 .popup-content {
     position: fixed;
     right: 30px;
-    bottom: 1000px;
+    bottom: 100px;
     width: 200px;
     z-index: 4;
     border-radius: 12px;
