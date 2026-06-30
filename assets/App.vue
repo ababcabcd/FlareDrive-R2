@@ -643,7 +643,11 @@ export default {
       let fileName;
       if (key.endsWith('_$folder$')) {
         // 对于文件夹，取去掉 _$folder$ 后的路径最后一部分
-        const folderPath = key.slice(0, -9);
+        let folderPath = key.slice(0, -9);
+        // 去除尾部斜杠（如果有）
+        if (folderPath.endsWith('/')) {
+          folderPath = folderPath.slice(0, -1);
+        }
         fileName = folderPath.split('/').pop();
       } else {
         fileName = key.split('/').pop();
@@ -655,13 +659,17 @@ export default {
       try {
         // 如果是目录（以_$folder$结尾），则需要移动整个目录内容
         if (key.endsWith('_$folder$')) {
-          // 获取源目录的基础路径（移除_$folder$后缀）
-          const sourceBasePath = key.slice(0, -9) + '/';
+          // 获取源目录的基础路径（移除_$folder$后缀并确保没有尾部斜杠）
+          let folderPath = key.slice(0, -9);
+          if (folderPath.endsWith('/')) {
+            folderPath = folderPath.slice(0, -1);
+          }
+          const sourceBasePath = folderPath + '/';
           // 获取目标目录的基础路径
           const targetBasePath = normalizedPath + fileName + '/';
 
           // 递归获取所有子文件和子目录
-          const allItems = await this.getAllItems(sourceBasePath.slice(0, -1));
+          const allItems = await this.getAllItems(folderPath);
 
           console.log('移动文件夹:', {
             sourceKey: key,
