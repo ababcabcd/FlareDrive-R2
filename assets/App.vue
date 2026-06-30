@@ -639,10 +639,15 @@ export default {
 
       const targetPath = folderOptions[selectedIndex].value;
 
-      // 获取文件名
-      const fileName = key.split('/').pop();
-      // 如果是文件夹,需要移除_$folder$后缀
-      const finalFileName = fileName.endsWith('_$folder$') ? fileName.slice(0, -9) : fileName;
+      // 获取文件名（对于文件夹需要特殊处理）
+      let fileName;
+      if (key.endsWith('_$folder$')) {
+        // 对于文件夹，取去掉 _$folder$ 后的路径最后一部分
+        const folderPath = key.slice(0, -9);
+        fileName = folderPath.split('/').pop();
+      } else {
+        fileName = key.split('/').pop();
+      }
 
       // 修复：正确处理目标路径，避免双斜杠
       const normalizedPath = targetPath === '' ? '' : (targetPath.endsWith('/') ? targetPath : targetPath + '/');
@@ -652,11 +657,19 @@ export default {
         if (key.endsWith('_$folder$')) {
           // 获取源目录的基础路径（移除_$folder$后缀）
           const sourceBasePath = key.slice(0, -9) + '/';
-          // 获取目标目录的基础路径，修复根目录的情况
-          const targetBasePath = normalizedPath + finalFileName + '/';
+          // 获取目标目录的基础路径
+          const targetBasePath = normalizedPath + fileName + '/';
 
           // 递归获取所有子文件和子目录
           const allItems = await this.getAllItems(sourceBasePath.slice(0, -1));
+
+          console.log('移动文件夹:', {
+            sourceKey: key,
+            sourceBasePath,
+            targetBasePath,
+            fileName,
+            allItems
+          });
 
           // 显示进度提示
           const totalItems = allItems.length;
@@ -666,6 +679,8 @@ export default {
           for (const item of allItems) {
             const relativePath = item.key.substring(sourceBasePath.length);
             const newPath = targetBasePath + relativePath;
+
+            console.log('移动项目:', item.key, '->', newPath);
 
             try {
               // 复制到新位置
@@ -683,6 +698,7 @@ export default {
 
           // 创建目标目录标记
           const targetFolderPath = targetBasePath + '_$folder$';
+          console.log('创建目标目录标记:', targetFolderPath);
           await axios.put(`/api/write/items/${targetFolderPath}`, '');
           // 删除原目录标记
           await axios.delete(`/api/write/items/${key}`);
@@ -697,8 +713,8 @@ export default {
             this.cwd = '';
           }
         } else {
-          // 单文件移动逻辑，修复根目录的情况
-          const targetFilePath = normalizedPath + finalFileName;
+          // 单文件移动逻辑
+          const targetFilePath = normalizedPath + fileName;
           await this.copyPaste(key, targetFilePath);
           await axios.delete(`/api/write/items/${key}`);
         }
