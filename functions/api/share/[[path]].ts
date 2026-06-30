@@ -1,5 +1,5 @@
 import { notFound, parseBucketPath } from "@/utils/bucket";
-import { get_auth_status } from "@/utils/auth";
+import { can_access_path } from "@/utils/auth";
 
 function generateShareToken(path: string, expiresInMinutes: number): string {
   const expires = Date.now() + expiresInMinutes * 60 * 1000;
@@ -9,14 +9,14 @@ function generateShareToken(path: string, expiresInMinutes: number): string {
 }
 
 export async function onRequestPost(context) {
-  if (!get_auth_status(context)) {
+  const [bucket, path] = parseBucketPath(context);
+  if (!bucket) return notFound();
+  
+  if (!can_access_path(context, path)) {
     const headers = new Headers();
     headers.set("WWW-Authenticate", 'Basic realm="需要登录"');
     return new Response("没有操作权限", { status: 401, headers });
   }
-
-  const [bucket, path] = parseBucketPath(context);
-  if (!bucket) return notFound();
 
   const request = context.request;
   const body = await request.json();
