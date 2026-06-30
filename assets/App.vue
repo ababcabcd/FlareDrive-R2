@@ -41,7 +41,7 @@
           </svg>
         </button>
         <Menu v-model="showMenu"
-          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }, { text: '管理分享链接' }]"
+          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '创建文件夹' }, { text: '粘贴文件到网盘' }, { text: '管理分享链接' }]"
           @click="onMenuClick" />
       </div>
     </div>
@@ -477,6 +477,8 @@ export default {
         case "按照大小递减排序":
           this.order = "大小↓";
           break;
+        case "创建文件夹":
+          return this.createFolder();
         case "粘贴文件到网盘":
           return this.pasteFile();
         case "管理分享链接":
@@ -575,7 +577,9 @@ export default {
     },
 
     async removeFile(key) {
-      if (!window.confirm(`确定要删除 ${key} 吗？`)) return;
+      const isFolder = key.endsWith("_$folder$");
+      const displayName = isFolder ? key.slice(0, -9) : key;
+      if (!window.confirm(isFolder ? `确定要删除文件夹 ${displayName} 及其所有内容吗？` : `确定要删除 ${displayName} 吗？`)) return;
       await axios.delete(`/api/write/items/${key}`);
       this.fetchFiles();
     },

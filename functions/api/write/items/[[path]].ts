@@ -132,17 +132,43 @@ export async function onRequestPut(context) {
 }
 
 export async function onRequestDelete(context) {
-  if(!get_auth_status(context)){
-    var header = new Headers()
-    header.set("WWW-Authenticate",'Basic realm="需要登录"')
+  if (!get_auth_status(context)) {
+    const headers = new Headers();
+    headers.set("WWW-Authenticate", 'Basic realm="需要登录"');
     return new Response("没有操作权限", {
-        status: 401,
-        headers: header,
+      status: 401,
+      headers,
     });
-   }
+  }
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
-  await bucket.delete(path);
+  if (path.endsWith("_$folder$")) {
+    const folderPath = path.slice(0, -9);
+    const folderPrefix = folderPath.endsWith("/") ? folderPath : `${folderPath}/`;
+
+    let continuationToken = null;
+    const deleteKeys = [];
+
+    do {
+      const listResult = await bucket.list({
+        prefix: folderPrefix,
+        continuationToken,
+      });
+
+      for (const obj of listResult.objects) {
+        deleteKeys.push(obj.key);
+      }
+
+      continuationToken = listResult.continuationToken;
+    } while (continuationToken);
+
+    if (deleteKeys.length > 0) {
+      await bucket.delete(deleteKeys);
+    }
+  } else {
+    await bucket.delete(path);
+  }
+
   return new Response(null, { status: 204 });
 }
