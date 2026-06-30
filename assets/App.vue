@@ -595,34 +595,11 @@ export default {
     async moveFile(key) {
       // 获取当前的目录结构
       const currentPath = this.cwd; // 当前所在目录
-      let allFolders = [...this.folders]; // 当前目录的直接子文件夹
+      console.log('moveFile called:', { key, currentPath, folders: this.folders });
 
-      // 获取同级文件夹（父目录下的其他文件夹）
-      if (currentPath !== '') {
-        const parentPath = currentPath.replace(/[^\/]+\/$/, '');
-        if (parentPath !== '') {
-          // 获取父目录下的所有文件夹
-          try {
-            const response = await fetch(`/api/children/${parentPath}`);
-            const data = await response.json();
-            // 过滤出文件夹，且不包括当前目录本身
-            const siblingFolders = data.folders.filter(f =>
-              f !== currentPath && !f.startsWith(currentPath + '/')
-            );
-            allFolders = [...siblingFolders, ...allFolders];
-          } catch (error) {
-            console.error('获取同级文件夹失败:', error);
-          }
-        }
-      }
-
-      // 添加返回上级目录选项（仅当不在根目录时）
-      if (currentPath !== '') {
-        const parentPath = currentPath.replace(/[^\/]+\/$/, '');
-        if (!allFolders.includes(parentPath) && parentPath !== '') {
-          allFolders.unshift(parentPath);
-        }
-      }
+      // 递归获取所有文件夹
+      const allFolders = await this.getAllFolders();
+      console.log('所有可用文件夹:', allFolders);
 
       // 添加根目录选项
       if (!allFolders.includes('')) {
@@ -813,6 +790,37 @@ export default {
       } while (marker);
 
       return items;
+    },
+
+    // 递归获取所有文件夹
+    async getAllFolders(prefix = '') {
+      const folders = [];
+      let marker = null;
+
+      const normalizedPrefix = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+
+      do {
+        const url = new URL(`/api/children/${normalizedPrefix}`, window.location.origin);
+        if (marker) {
+          url.searchParams.set('marker', marker);
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        // 添加当前目录的直接子文件夹
+        for (const folder of data.folders) {
+          const folderPath = folder.endsWith('/') ? folder.slice(0, -1) : folder;
+          folders.push(folderPath);
+          // 递归获取子文件夹的子文件夹
+          const subFolders = await this.getAllFolders(folderPath);
+          folders.push(...subFolders);
+        }
+
+        marker = data.marker;
+      } while (marker);
+
+      return folders;
     },
 
     uploadFiles(files) {
