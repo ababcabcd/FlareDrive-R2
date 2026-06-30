@@ -674,6 +674,8 @@ export default {
           // 显示进度提示
           const totalItems = allItems.length;
           let processedItems = 0;
+          // 收集所有需要创建的子文件夹标记
+          const subFolders = new Set();
 
           // 移动所有项目
           for (const item of allItems) {
@@ -688,11 +690,32 @@ export default {
               // 删除原位置
               await axios.delete(`/api/write/items/${item.key}`);
 
+              // 收集子文件夹路径
+              const pathParts = relativePath.split('/');
+              if (pathParts.length > 1) {
+                // 文件在子文件夹中，需要创建子文件夹标记
+                for (let i = 1; i < pathParts.length; i++) {
+                  const subFolderPath = targetBasePath + pathParts.slice(0, i).join('/');
+                  subFolders.add(subFolderPath);
+                }
+              }
+
               // 更新进度
               processedItems++;
               this.uploadProgress = (processedItems / totalItems) * 100;
             } catch (error) {
               console.error(`移动 ${item.key} 失败:`, error);
+            }
+          }
+
+          // 创建所有子文件夹标记
+          console.log('创建子文件夹标记:', Array.from(subFolders));
+          for (const subFolder of subFolders) {
+            const subFolderMarker = subFolder + '/_$folder$';
+            try {
+              await axios.put(`/api/write/items/${subFolderMarker}`, '');
+            } catch (error) {
+              console.error(`创建文件夹标记 ${subFolderMarker} 失败:`, error);
             }
           }
 
@@ -727,7 +750,7 @@ export default {
       }
     },
 
-    // 新增：递归获取目录下所有文件和子目录
+    // 新增：递归获取目录下所有文件和子目录（不包含_$folder$标记文件）
     async getAllItems(prefix) {
       const items = [];
       let marker = null;
@@ -744,18 +767,12 @@ export default {
         const response = await fetch(url);
         const data = await response.json();
 
-        // 添加文件
-        items.push(...data.value);
+        // 添加文件（过滤掉_$folder$标记文件）
+        const files = data.value.filter(item => !item.key.endsWith('_$folder$'));
+        items.push(...files);
 
         // 处理子目录
         for (const folder of data.folders) {
-          // 添加目录标记
-          items.push({
-            key: folder + '_$folder$',
-            size: 0,
-            uploaded: new Date().toISOString(),
-          });
-
           // 递归获取子目录内容（folder 已经带尾部斜杠，需要去除）
           const folderPrefix = folder.endsWith('/') ? folder.slice(0, -1) : folder;
           const subItems = await this.getAllItems(folderPrefix);
