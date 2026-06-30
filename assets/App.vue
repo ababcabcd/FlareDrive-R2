@@ -171,6 +171,11 @@
           </button>
         </li>
         <li>
+          <button @click="openShareModal(focusedItem.key)">
+            <span>分享文件</span>
+          </button>
+        </li>
+        <li>
           <button style="color: red" @click="removeFile(focusedItem.key)">
             <span>删除</span>
           </button>
@@ -178,6 +183,34 @@
       </ul>
     </Dialog>
     <div style="flex:1"></div>
+    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false">
+      <div class="share-modal" @click.stop>
+        <div class="share-modal-header">
+          <h3>分享文件</h3>
+          <button class="close-btn" @click="showShareModal = false">×</button>
+        </div>
+        <div class="share-modal-body">
+          <div class="share-option">
+            <label>过期时间</label>
+            <select v-model="shareExpires" class="share-select">
+              <option :value="30">30分钟</option>
+              <option :value="60">1小时</option>
+              <option :value="24 * 60">1天</option>
+              <option :value="7 * 24 * 60">7天</option>
+              <option :value="30 * 24 * 60">30天</option>
+            </select>
+          </div>
+          <button class="generate-share-btn" @click="generateShareLink" :disabled="shareGenerating">
+            {{ shareGenerating ? '生成中...' : '生成分享链接' }}
+          </button>
+          <div v-if="shareLink" class="share-link-container">
+            <input type="text" :value="shareLink" readonly class="share-link-input" />
+            <button class="copy-share-btn" @click="copyShareLink">复制链接</button>
+          </div>
+          <div v-if="shareError" class="share-error">{{ shareError }}</div>
+        </div>
+      </div>
+    </div>
     <Footer />
   </div>
 </template>
@@ -210,7 +243,13 @@ export default {
     showUploadPopup: false,
     uploadProgress: null,
     uploadQueue: [],
-    backgroundImageUrl: ""
+    backgroundImageUrl: "",
+    showShareModal: false,
+    shareFileKey: null,
+    shareExpires: 24 * 60,
+    shareLink: null,
+    shareGenerating: false,
+    shareError: null
   }),
 
   computed: {
@@ -237,6 +276,40 @@ export default {
     copyLink(link) {
       const url = new URL(link, window.location.origin);
       navigator.clipboard.writeText(url.toString());
+    },
+
+    openShareModal(fileKey) {
+      this.shareFileKey = fileKey;
+      this.shareLink = null;
+      this.shareError = null;
+      this.shareExpires = 24 * 60;
+      this.showShareModal = true;
+    },
+
+    async generateShareLink() {
+      if (!this.shareFileKey) return;
+      this.shareGenerating = true;
+      this.shareError = null;
+      this.shareLink = null;
+
+      try {
+        const response = await axios.post(`/api/share/${this.shareFileKey}`, {
+          expiresInMinutes: this.shareExpires,
+        });
+        this.shareLink = response.data.shareUrl;
+      } catch (error) {
+        this.shareError = "生成分享链接失败，请重试";
+        console.error("Share error:", error);
+      } finally {
+        this.shareGenerating = false;
+      }
+    },
+
+    copyShareLink() {
+      if (this.shareLink) {
+        navigator.clipboard.writeText(this.shareLink);
+        alert("分享链接已复制到剪贴板");
+      }
     },
 
     async copyPaste(source, target) {
@@ -706,5 +779,147 @@ export default {
   position: absolute;
   top: 100%;
   right: 0;
+}
+
+.share-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.share-modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.share-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+}
+
+.share-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #666;
+  cursor: pointer;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.share-modal-body {
+  padding: 20px;
+}
+
+.share-option {
+  margin-bottom: 16px;
+}
+
+.share-option label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #666;
+}
+
+.share-select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
+.generate-share-btn {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 16px;
+}
+
+.generate-share-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.generate-share-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.share-link-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.share-link-input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #333;
+  background: #f9f9f9;
+  word-break: break-all;
+}
+
+.copy-share-btn {
+  padding: 10px 16px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.copy-share-btn:hover {
+  background: #45a049;
+}
+
+.share-error {
+  color: #ef4444;
+  font-size: 14px;
+  text-align: center;
 }
 </style>
