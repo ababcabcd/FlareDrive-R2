@@ -41,7 +41,7 @@
           </svg>
         </button>
         <Menu v-model="showMenu"
-          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }]"
+          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }, { text: '管理分享链接' }]"
           @click="onMenuClick" />
       </div>
     </div>
@@ -211,6 +211,51 @@
         </div>
       </div>
     </div>
+    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false">
+      <div class="share-management-modal" @click.stop>
+        <div class="share-modal-header">
+          <h3>管理分享链接</h3>
+          <button class="close-btn" @click="showShareManagement = false">×</button>
+        </div>
+        <div class="share-management-body">
+          <div v-if="sharesLoading" class="shares-loading">加载中...</div>
+          <div v-else-if="shares.length === 0" class="shares-empty">暂无分享链接</div>
+          <div v-else class="shares-table-container">
+            <table class="shares-table">
+              <thead>
+                <tr>
+                  <th>文件名</th>
+                  <th>分享链接</th>
+                  <th>状态</th>
+                  <th>下载次数</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="share in shares" :key="share.shareId">
+                  <td class="share-filename" :title="share.fileName">{{ share.fileName }}</td>
+                  <td>
+                    <a :href="share.shareUrl" target="_blank" class="share-link" :title="share.shareUrl">{{ share.shareUrl }}</a>
+                    <button class="copy-share-btn-small" @click="copyShareUrl(share.shareUrl)">📋</button>
+                  </td>
+                  <td>
+                    <span :class="['share-status', share.isExpired ? 'expired' : 'active']">
+                      {{ share.isExpired ? '已过期' : '有效' }}
+                    </span>
+                  </td>
+                  <td>
+                    {{ share.currentDownloads }} / {{ share.maxDownloads || '∞' }}
+                  </td>
+                  <td>
+                    <button class="delete-share-btn" @click="deleteShare(share.shareId)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
     <Footer />
   </div>
 </template>
@@ -249,7 +294,10 @@ export default {
     shareExpires: 24 * 60,
     shareLink: null,
     shareGenerating: false,
-    shareError: null
+    shareError: null,
+    showShareManagement: false,
+    shares: [],
+    sharesLoading: false
   }),
 
   computed: {
@@ -309,6 +357,40 @@ export default {
       if (this.shareLink) {
         navigator.clipboard.writeText(this.shareLink);
         alert("分享链接已复制到剪贴板");
+      }
+    },
+
+    async openShareManagement() {
+      this.showShareManagement = true;
+      await this.fetchShares();
+    },
+
+    async fetchShares() {
+      this.sharesLoading = true;
+      try {
+        const response = await axios.get("/api/shares");
+        this.shares = response.data.shares;
+      } catch (error) {
+        console.error("Fetch shares error:", error);
+        this.shares = [];
+      } finally {
+        this.sharesLoading = false;
+      }
+    },
+
+    copyShareUrl(url) {
+      navigator.clipboard.writeText(url);
+      alert("分享链接已复制到剪贴板");
+    },
+
+    async deleteShare(shareId) {
+      if (!confirm("确定要删除这个分享链接吗？")) return;
+      try {
+        await axios.delete(`/api/shares?shareId=${shareId}`);
+        await this.fetchShares();
+      } catch (error) {
+        console.error("Delete share error:", error);
+        alert("删除分享链接失败");
       }
     },
 
@@ -397,6 +479,8 @@ export default {
           break;
         case "粘贴文件到网盘":
           return this.pasteFile();
+        case "管理分享链接":
+          return this.openShareManagement();
       }
       this.files.sort((a, b) => {
         if (this.order === "大小↑") {
@@ -921,5 +1005,129 @@ export default {
   color: #ef4444;
   font-size: 14px;
   text-align: center;
+}
+
+.share-management-modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 80vh;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.share-management-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.shares-loading,
+.shares-empty {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+  font-size: 16px;
+}
+
+.shares-table-container {
+  overflow-x: auto;
+}
+
+.shares-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.shares-table th,
+.shares-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.shares-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+}
+
+.shares-table tr:hover {
+  background: #f9f9f9;
+}
+
+.share-filename {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-link {
+  color: #667eea;
+  text-decoration: none;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.share-link:hover {
+  text-decoration: underline;
+}
+
+.copy-share-btn-small {
+  background: #f0f0f0;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.copy-share-btn-small:hover {
+  background: #e0e0e0;
+}
+
+.share-status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.share-status.active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.share-status.expired {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.delete-share-btn {
+  padding: 6px 12px;
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.delete-share-btn:hover {
+  background: #c82333;
 }
 </style>

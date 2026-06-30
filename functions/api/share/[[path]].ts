@@ -1,11 +1,35 @@
 import { notFound, parseBucketPath } from "@/utils/bucket";
 import { can_access_path } from "@/utils/auth";
 
-function generateShareToken(path: string, expiresInMinutes: number): string {
-  const expires = Date.now() + expiresInMinutes * 60 * 1000;
-  const random = Math.random().toString(36).substring(2, 15);
-  const data = JSON.stringify({ path, expires, random });
-  return btoa(data);
+const SHARES_PREFIX = "_$flaredrive$/shares/";
+
+interface ShareMetadata {
+  key: string;
+  expiresAt: number | undefined;
+  maxDownloads: number | undefined;
+  currentDownloads: number;
+  createdAt: number;
+}
+
+function generateShareId(): string {
+  return Math.random().toString(36).substring(2, 12);
+}
+
+async function generateUniqueShareId(bucket): Promise<string> {
+  let shareId = "";
+  let attempts = 0;
+  const maxAttempts = 5;
+  
+  while (attempts < maxAttempts) {
+    shareId = generateShareId();
+    const existingShare = await bucket.head(`${SHARES_PREFIX}${shareId}.json`);
+    if (!existingShare) {
+      break;
+    }
+    attempts++;
+  }
+  
+  return shareId;
 }
 
 export async function onRequestPost(context) {
@@ -21,11 +45,32 @@ export async function onRequestPost(context) {
   const request = context.request;
   const body = await request.json();
   const expiresInMinutes = body.expiresInMinutes || 24 * 60;
+  
+  const shareId = await generateUniqueShareId(bucket);
+  
+  const expiresAt = expiresInMinutes > 0 
+    ? Date.now() + expiresInMinutes * 60 * 1000 
+    : undefined;
 
-  const token = generateShareToken(path, expiresInMinutes);
-  const shareUrl = `${new URL(request.url).origin}/share/${token}`;
+  const shareMetadata: ShareMetadata = {
+    key: path,
+    expiresAt,
+    maxDownloads: body.maxDownloads || undefined,
+    currentDownloads: 0,
+    createdAt: Date.now(),
+  };
 
-  return new Response(JSON.stringify({ shareUrl, token, expiresInMinutes }), {
+  await bucket.put(
+    `${SHARES_PREFIX}${shareId}.json`,
+    JSON.stringify(shareMetadata),
+    {
+      httpMetadata: { contentType: "application/json" },
+    }
+  );
+
+  const shareUrl = `${new URL(request.url).origin}/share/${shareId}`;
+
+  return new Response(JSON.stringify({ shareUrl, shareId, expiresAt }), {
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -38,18 +83,36 @@ export async function onRequestGet(context) {
   const token = url.searchParams.get("token");
 
   if (!token) {
-    return new Response("缺少分享 token", { status: 400 });
+    return new Response(JSON.stringify({ valid: false, message: "缺少分享 token" }), {
+      headers: { "Content-Type": "application/json" },
+      status: 400,
+    });
   }
 
   try {
-    const decoded = JSON.parse(atob(token));
-    if (Date.now() > decoded.expires) {
+    const shareObject = await bucket.get(`${SHARES_PREFIX}${token}.json`);
+    if (!shareObject) {
+      return new Response(JSON.stringify({ valid: false, message: "分享链接不存在" }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const metadata: ShareMetadata = JSON.parse(await shareObject.text());
+    const now = Date.now();
+
+    if (metadata.expiresAt && now > metadata.expiresAt) {
       return new Response(JSON.stringify({ valid: false, message: "分享链接已过期" }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    const obj = await bucket.get(decoded.path);
+    if (metadata.maxDownloads && metadata.currentDownloads >= metadata.maxDownloads) {
+      return new Response(JSON.stringify({ valid: false, message: "下载次数已用完" }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const obj = await bucket.get(metadata.key);
     if (!obj) {
       return new Response(JSON.stringify({ valid: false, message: "文件不存在" }), {
         headers: { "Content-Type": "application/json" },
@@ -58,10 +121,12 @@ export async function onRequestGet(context) {
 
     return new Response(JSON.stringify({
       valid: true,
-      path: decoded.path,
-      fileName: decoded.path.split("/").pop(),
+      path: metadata.key,
+      fileName: metadata.key.split("/").pop(),
       size: obj.size,
       contentType: obj.httpMetadata?.contentType,
+      currentDownloads: metadata.currentDownloads,
+      maxDownloads: metadata.maxDownloads,
     }), {
       headers: { "Content-Type": "application/json" },
     });

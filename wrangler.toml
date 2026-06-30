@@ -5,3 +5,4 @@ send_metrics = false
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "BUCKET"
+preview_bucket_name = "BUCKET"
