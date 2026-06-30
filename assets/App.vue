@@ -41,7 +41,7 @@
           </svg>
         </button>
         <Menu v-model="showMenu"
-          :items="[{ text: '新建文件夹' }, { text: '管理分享链接' }, { text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }]"
+          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }]"
           @click="onMenuClick" />
       </div>
     </div>
@@ -472,10 +472,6 @@ export default {
 
     onMenuClick(text) {
       switch (text) {
-        case "新建文件夹":
-          return this.createFolder();
-        case "管理分享链接":
-          return this.openShareManagement();
         case "按照名称排序A-Z":
           this.order = null;
           break;
