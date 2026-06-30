@@ -41,7 +41,7 @@
           </svg>
         </button>
         <Menu v-model="showMenu"
-          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '创建文件夹' }, { text: '粘贴文件到网盘' }, { text: '管理分享链接' }]"
+          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }, { text: '管理分享链接' }, { text: '新建文件夹' }]"
           @click="onMenuClick" />
       </div>
     </div>
@@ -477,12 +477,12 @@ export default {
         case "按照大小递减排序":
           this.order = "大小↓";
           break;
-        case "创建文件夹":
-          return this.createFolder();
         case "粘贴文件到网盘":
           return this.pasteFile();
         case "管理分享链接":
           return this.openShareManagement();
+        case "新建文件夹":
+          return this.createFolder();
       }
       this.files.sort((a, b) => {
         if (this.order === "大小↑") {
