@@ -41,11 +41,15 @@
           </svg>
         </button>
         <Menu v-model="showMenu"
-          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }, { text: '管理分享链接' }, { text: '新建文件夹' }]"
+          :items="[{ text: '新建文件夹' }, { text: '管理分享链接' }, { text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }]"
           @click="onMenuClick" />
       </div>
     </div>
     <div class="file-list-container">
+      <div class="toolbar">
+        <button class="toolbar-btn" @click="createFolder()">新建文件夹</button>
+        <button class="toolbar-btn" @click="openShareManagement()">管理分享链接</button>
+      </div>
       <ul class="file-list">
         <li v-if="cwd !== ''">
           <div tabindex="0" class="file-item" @click="cwd = cwd.replace(/[^\/]+\/$/, '')" @contextmenu.prevent>
@@ -468,6 +472,10 @@ export default {
 
     onMenuClick(text) {
       switch (text) {
+        case "新建文件夹":
+          return this.createFolder();
+        case "管理分享链接":
+          return this.openShareManagement();
         case "按照名称排序A-Z":
           this.order = null;
           break;
@@ -479,10 +487,6 @@ export default {
           break;
         case "粘贴文件到网盘":
           return this.pasteFile();
-        case "管理分享链接":
-          return this.openShareManagement();
-        case "新建文件夹":
-          return this.createFolder();
       }
       this.files.sort((a, b) => {
         if (this.order === "大小↑") {
@@ -708,8 +712,11 @@ export default {
       const items = [];
       let marker = null;
 
+      // 去除尾部斜杠，避免双斜杠问题
+      const normalizedPrefix = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+
       do {
-        const url = new URL(`/api/children/${prefix}`, window.location.origin);
+        const url = new URL(`/api/children/${normalizedPrefix}`, window.location.origin);
         if (marker) {
           url.searchParams.set('marker', marker);
         }
@@ -729,8 +736,9 @@ export default {
             uploaded: new Date().toISOString(),
           });
 
-          // 递归获取子目录内容
-          const subItems = await this.getAllItems(folder);
+          // 递归获取子目录内容（folder 已经带尾部斜杠，需要去除）
+          const folderPrefix = folder.endsWith('/') ? folder.slice(0, -1) : folder;
+          const subItems = await this.getAllItems(folderPrefix);
           items.push(...subItems);
         }
 
@@ -846,6 +854,29 @@ export default {
   border-radius: 12px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   transition: width 0.3s ease;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  margin-bottom: 10px;
+}
+
+.toolbar-btn {
+  padding: 8px 16px;
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.toolbar-btn:hover {
+  background: #357abd;
 }
 
 @media (max-width: 1280px) {
