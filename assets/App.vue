@@ -651,12 +651,12 @@ export default {
         // 如果是目录（以_$folder$结尾），则需要移动整个目录内容
         if (key.endsWith('_$folder$')) {
           // 获取源目录的基础路径（移除_$folder$后缀）
-          const sourceBasePath = key.slice(0, -9);
+          const sourceBasePath = key.slice(0, -9) + '/';
           // 获取目标目录的基础路径，修复根目录的情况
           const targetBasePath = normalizedPath + finalFileName + '/';
 
           // 递归获取所有子文件和子目录
-          const allItems = await this.getAllItems(sourceBasePath);
+          const allItems = await this.getAllItems(sourceBasePath.slice(0, -1));
 
           // 显示进度提示
           const totalItems = allItems.length;
@@ -681,13 +681,21 @@ export default {
             }
           }
 
-          // 移动目录标记
+          // 创建目标目录标记
           const targetFolderPath = targetBasePath.slice(0, -1) + '_$folder$';
-          await this.copyPaste(key, targetFolderPath);
+          await axios.put(`/api/write/items/${targetFolderPath}`, '');
+          // 删除原目录标记
           await axios.delete(`/api/write/items/${key}`);
 
           // 清除进度
           this.uploadProgress = null;
+
+          // 进入目标目录查看移动结果
+          if (targetPath !== '') {
+            this.cwd = targetPath;
+          } else {
+            this.cwd = '';
+          }
         } else {
           // 单文件移动逻辑，修复根目录的情况
           const targetFilePath = normalizedPath + finalFileName;
