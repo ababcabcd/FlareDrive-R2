@@ -595,9 +595,28 @@ export default {
     async moveFile(key) {
       // 获取当前的目录结构
       const currentPath = this.cwd; // 当前所在目录
-      const allFolders = [...this.folders]; // 所有可用目录
+      let allFolders = [...this.folders]; // 当前目录的直接子文件夹
 
-      // 如果不在根目录，添加返回上级目录选项
+      // 获取同级文件夹（父目录下的其他文件夹）
+      if (currentPath !== '') {
+        const parentPath = currentPath.replace(/[^\/]+\/$/, '');
+        if (parentPath !== '') {
+          // 获取父目录下的所有文件夹
+          try {
+            const response = await fetch(`/api/children/${parentPath}`);
+            const data = await response.json();
+            // 过滤出文件夹，且不包括当前目录本身
+            const siblingFolders = data.folders.filter(f =>
+              f !== currentPath && !f.startsWith(currentPath + '/')
+            );
+            allFolders = [...siblingFolders, ...allFolders];
+          } catch (error) {
+            console.error('获取同级文件夹失败:', error);
+          }
+        }
+      }
+
+      // 添加返回上级目录选项（仅当不在根目录时）
       if (currentPath !== '') {
         const parentPath = currentPath.replace(/[^\/]+\/$/, '');
         if (!allFolders.includes(parentPath) && parentPath !== '') {
@@ -638,6 +657,12 @@ export default {
       }
 
       const targetPath = folderOptions[selectedIndex].value;
+
+      // 如果目标是当前目录，则不进行移动
+      if (targetPath === currentPath) {
+        alert('目标目录与源目录相同，无需移动');
+        return;
+      }
 
       // 获取文件名（对于文件夹需要特殊处理）
       let fileName;
@@ -739,21 +764,16 @@ export default {
           // 清除进度
           this.uploadProgress = null;
 
-          // 进入目标目录查看移动结果
-          if (targetPath !== '') {
-            this.cwd = targetPath;
-          } else {
-            this.cwd = '';
-          }
+          // 刷新文件列表（留在当前目录）
+          this.fetchFiles();
         } else {
           // 单文件移动逻辑
           const targetFilePath = normalizedPath + fileName;
           await this.copyPaste(key, targetFilePath);
           await axios.delete(`/api/write/items/${key}`);
+          // 刷新文件列表（留在当前目录）
+          this.fetchFiles();
         }
-
-        // 刷新文件列表
-        this.fetchFiles();
       } catch (error) {
         console.error('移动失败:', error);
         alert('移动失败,请检查目标路径是否正确');
