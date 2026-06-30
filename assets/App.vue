@@ -399,7 +399,7 @@ export default {
     },
 
     async copyPaste(source, target) {
-      const uploadUrl = `/api/write/items/${target}`;
+      const uploadUrl = `/api/write/items/${encodeURIComponent(target)}`;
       await axios.put(uploadUrl, "", {
         headers: { "x-amz-copy-source": encodeURIComponent(source) },
       });
@@ -686,9 +686,11 @@ export default {
 
             try {
               // 复制到新位置
-              await this.copyPaste(item.key, newPath);
+              console.log('复制:', sourceBasePath + relativePath, '->', newPath);
+              await this.copyPaste(sourceBasePath + relativePath, newPath);
               // 删除原位置
-              await axios.delete(`/api/write/items/${item.key}`);
+              console.log('删除:', sourceBasePath + relativePath);
+              await axios.delete(`/api/write/items/${encodeURIComponent(sourceBasePath + relativePath)}`);
 
               // 收集子文件夹路径
               const pathParts = relativePath.split('/');
