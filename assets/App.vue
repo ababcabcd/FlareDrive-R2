@@ -682,7 +682,7 @@ export default {
           }
 
           // 创建目标目录标记
-          const targetFolderPath = targetBasePath.slice(0, -1) + '_$folder$';
+          const targetFolderPath = targetBasePath + '_$folder$';
           await axios.put(`/api/write/items/${targetFolderPath}`, '');
           // 删除原目录标记
           await axios.delete(`/api/write/items/${key}`);
