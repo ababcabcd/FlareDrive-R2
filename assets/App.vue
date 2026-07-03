@@ -77,8 +77,17 @@
           </template>
         </div>
         <div class="toolbar-actions">
-          <button class="toolbar-btn" @click="createFolder()">新建文件夹</button>
-          <button class="toolbar-btn" @click="openShareManagement()">管理分享链接</button>
+          <button class="toolbar-icon-btn" @click="createFolder()" title="新建文件夹">
+            <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+              <path d="M703.8 547.8h-167v-167c0-13.8-11.2-25-25-25s-25 11.2-25 25v167h-167c-13.8 0-25 11.2-25 25s11.2 25 25 25h167v167c0 13.8 11.2 25 25 25s25-11.2 25-25v-167h167c13.8 0 25-11.2 25-25s-11.2-25-25-25z" fill="currentColor"/>
+              <path d="M833.3 234.1H530.8l-29.6-58.5c-10.4-20.6-26.4-37.9-46.1-50.1-19.7-12.1-42.3-18.5-65.5-18.5H188.7c-68.9 0-125 56.1-125 125v513.5c0 96.5 78.5 175 175 175h544.7c96.5 0 175-78.5 175-175V359.1c-0.1-68.9-56.1-125-125.1-125z m75 511.5c0 68.9-56.1 125-125 125H238.7c-68.9 0-125-56.1-125-125V232c0-41.4 33.6-75 75-75h200.9c28.4 0 54.1 15.8 66.9 41.1l36.6 72.2c4.3 8.4 12.9 13.7 22.3 13.7h317.9c41.4 0 75 33.6 75 75v386.6z" fill="currentColor"/>
+            </svg>
+          </button>
+          <button class="toolbar-icon-btn" @click="openShareManagement()" title="管理分享链接">
+            <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+              <path d="M576.8 728c-32.8 0-55.2 22.4-55.2 54.4 0 32.8 22.4 54.4 55.2 54.4 32.8 0 55.2-22.4 55.2-54.4-0.8-32-22.4-54.4-55.2-54.4zM284 510.4c-32.8 0-55.2 22.4-55.2 54.4 0 32.8 22.4 54.4 55.2 54.4 32.8 0 55.2-22.4 55.2-54.4s-22.4-54.4-55.2-54.4z m492.8-365.6H73.6c-21.6 0-40 8-53.6 23.2C7.2 184 0 204 0 228v711.2c0 22.4 8 42.4 24 59.2 16 16.8 34.4 25.6 54.4 25.6h708c24 0 43.2-8 59.2-24.8s24-34.4 24-53.6V247.2c0-30.4-7.2-55.2-22.4-74.4-13.6-18.4-37.6-28-70.4-28z m-200 756.8c-65.6 0-119.2-48.8-119.2-114.4 0-11.2 1.6-21.6 4.8-32L346.4 669.6c-18.4 12-38.4 14.4-62.4 14.4-65.6 0-119.2-53.6-119.2-118.4 0-65.6 53.6-118.4 119.2-118.4 32.8 0 59.2 8.8 80.8 29.6L463.2 416c-4-12-7.2-20-7.2-33.6C456 316.8 509.6 264 575.2 264s119.2 53.6 119.2 118.4c0 65.6-53.6 118.4-119.2 118.4-30.4 0-56-7.2-76.8-26.4l-100.8 59.2c3.2 10.4 5.6 21.6 5.6 33.6 0 19.2-0.8 32.8-8.8 49.6l100.8 77.6c21.6-21.6 49.6-31.2 82.4-31.2 65.6 0 119.2 53.6 119.2 118.4-1.6 66.4-54.4 120-120 120zM992 35.2c-21.6-24-68.8-35.2-104-35.2H304c-19.2 0-36 6.4-50.4 20-13.6 13.6-20.8 29.6-20.8 49.6v11.2h580.8c52 0 76.8 1.6 99.2 21.6 21.6 19.2 24 39.2 24 86.4v678.4h16c19.2 0 36-6.4 50.4-20 13.6-13.6 20.8-29.6 20.8-49.6v-664c0-30.4-11.2-74.4-32-98.4zM575.2 436.8c32.8 0 55.2-22.4 55.2-54.4 0-32.8-22.4-54.4-55.2-54.4-32.8 0-55.2 22.4-55.2 54.4 0 32.8 22.4 54.4 55.2 54.4z" fill="currentColor"/>
+            </svg>
+          </button>
         </div>
       </div>
       <ul class="file-list">
@@ -1146,19 +1155,26 @@ export default {
   flex-shrink: 0;
 }
 
-.toolbar-btn {
-  padding: 8px 16px;
-  background: #4a90d9;
-  color: white;
+.toolbar-icon-btn {
+  padding: 8px;
+  background: transparent;
+  color: #666;
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.toolbar-btn:hover {
-  background: #357abd;
+.toolbar-icon-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #333;
+}
+
+.toolbar-icon-btn:active {
+  background: rgba(0, 0, 0, 0.12);
 }
 
 @media (max-width: 1280px) {
