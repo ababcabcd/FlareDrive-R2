@@ -21,7 +21,14 @@
         <h1 class="app-title" style="font-size: 20px;margin: 0 25px 0 8px; user-select: none;">PAN</h1>
       </a>
 
-      <input type="search" v-model="search" aria-label="Search" placeholder="🍿 输入以全局搜索文件" />
+      <input 
+        type="search" 
+        v-model="search" 
+        aria-label="Search" 
+        placeholder="🍿 输入以全局搜索文件" 
+        @input="handleSearch"
+        @keyup.enter="handleSearch"
+      />
       <div class="menu-button">
         <button class="circle" @click="showMenu = true" style="display: flex; align-items: center;background-color: rgb(245, 245, 245);">
           <p style="
@@ -90,7 +97,34 @@
           </button>
         </div>
       </div>
-      <ul class="file-list">
+
+      <div v-if="searchResults.length > 0" class="search-results">
+        <div class="search-header">
+          <span class="search-count">找到 {{ searchResults.length }} 个结果</span>
+          <button class="search-close" @click="search = ''; searchResults = []">✕</button>
+        </div>
+        <ul class="search-list">
+          <li 
+            v-for="result in searchResults" 
+            :key="result.key"
+            class="search-item"
+            @click="navigateToFile(result.path)"
+          >
+            <div class="search-icon">
+              <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+                <path d="M476.5 407.6L319.6 226.8c20.9-26.8 32.6-59.9 32.6-95.4C352 69.3 282.7 0 192 0S32 69.3 32 131.4c0 62.1 50.7 112.8 112.8 112.8 35.5 0 68.6-11.7 95.4-32.6l180.8 176.8c4.1 4 10.8 4 14.8 0 4.1-4.1 4.1-10.8 0-14.8zM192 213.4c-44.1 0-80-35.9-80-80s35.9-80 80-80 80 35.9 80 80-35.9 80-80 80z" fill="#1a73e8"/>
+              </svg>
+            </div>
+            <div class="search-info">
+              <span class="search-name">{{ result.name }}</span>
+              <span class="search-path">/{{ result.path }}</span>
+            </div>
+            <span class="search-size">{{ this.formatSize(result.size) }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <ul class="file-list" v-if="searchResults.length === 0">
         <li v-if="cwd !== ''">
           <button class="back-link" @click="cwd = cwd.replace(/[^\/]+\/$/, '')">
             返回上级目录
@@ -325,6 +359,8 @@ export default {
     loading: false,
     order: null,
     search: "",
+    searchResults: [],
+    searchLoading: false,
     showContextMenu: false,
     showMenu: false,
     showUploadPopup: false,
@@ -439,6 +475,44 @@ export default {
 
     navigateToPath(path) {
       this.cwd = path;
+    },
+
+    handleSearch() {
+      if (this.searchTimeout) clearTimeout(this.searchTimeout);
+      
+      const query = this.search.trim();
+      if (!query) {
+        this.searchResults = [];
+        this.searchLoading = false;
+        return;
+      }
+      
+      this.searchLoading = true;
+      this.searchTimeout = setTimeout(async () => {
+        try {
+          const url = new URL('/api/search', window.location.origin);
+          url.searchParams.set('q', query);
+          url.searchParams.set('path', '');
+          
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            this.searchResults = data.results || [];
+          } else {
+            this.searchResults = [];
+          }
+        } catch (e) {
+          this.searchResults = [];
+        } finally {
+          this.searchLoading = false;
+        }
+      }, 300);
+    },
+
+    navigateToFile(path) {
+      this.cwd = path;
+      this.search = '';
+      this.searchResults = [];
     },
 
     copyLink(link) {
@@ -1114,6 +1188,102 @@ export default {
   font-size: 14px;
   height: 0;
   overflow: hidden;
+}
+
+.search-results {
+  background: #fff;
+  border-radius: 10px;
+  margin: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.search-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #eee;
+}
+
+.search-count {
+  font-size: 14px;
+  color: #666;
+}
+
+.search-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #999;
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 1;
+}
+
+.search-close:hover {
+  color: #333;
+}
+
+.search-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.search-item:last-child {
+  border-bottom: none;
+}
+
+.search-item:hover {
+  background-color: #f8f9fa;
+}
+
+.search-icon {
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.search-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-path {
+  display: block;
+  font-size: 12px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.search-size {
+  font-size: 12px;
+  color: #999;
+  margin-left: 12px;
+  flex-shrink: 0;
 }
 
 .path-link {
