@@ -55,11 +55,19 @@
           </button>
           <template v-if="cwd">
             <span class="path-separator">/</span>
-            <template v-for="(segment, index) in cwdSegments" :key="index">
-              <button class="path-link" @click="navigateToPath(segment.path)">
-                {{ segment.name }}
-              </button>
-              <span class="path-separator" v-if="index < cwdSegments.length - 1">/</span>
+            <template v-for="(segment, index) in visiblePathSegments" :key="index">
+              <template v-if="segment.isEllipsis">
+                <span class="path-ellipsis">…</span>
+              </template>
+              <template v-else-if="segment.isCurrent">
+                <span class="path-current">{{ segment.name }}</span>
+              </template>
+              <template v-else>
+                <button class="path-link" @click="navigateToPath(segment.path)">
+                  {{ segment.name }}
+                </button>
+              </template>
+              <span class="path-separator" v-if="index < visiblePathSegments.length - 1 && !segment.isEllipsis">/</span>
             </template>
           </template>
         </div>
@@ -346,14 +354,40 @@ export default {
       return folders;
     },
 
-    cwdSegments() {
+    visiblePathSegments() {
       if (!this.cwd) return [];
       const path = this.cwd.replace(/\/$/, '');
       const parts = path.split('/').filter(p => p);
-      return parts.map((part, index) => ({
-        name: part,
-        path: parts.slice(0, index + 1).join('/') + '/'
-      }));
+      
+      if (parts.length <= 2) {
+        return parts.map((part, index) => ({
+          name: part,
+          path: parts.slice(0, index + 1).join('/') + '/',
+          isCurrent: index === parts.length - 1,
+          isEllipsis: false
+        }));
+      }
+      
+      return [
+        {
+          name: parts[0],
+          path: parts[0] + '/',
+          isCurrent: false,
+          isEllipsis: false
+        },
+        {
+          name: '…',
+          path: '',
+          isCurrent: false,
+          isEllipsis: true
+        },
+        {
+          name: parts[parts.length - 1],
+          path: parts.join('/') + '/',
+          isCurrent: true,
+          isEllipsis: false
+        }
+      ];
     },
   },
 
@@ -1040,6 +1074,18 @@ export default {
 
 .path-link:hover {
   color: #357abd;
+}
+
+.path-current {
+  color: #333;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.path-ellipsis {
+  color: #999;
+  font-size: 14px;
+  margin: 0 2px;
 }
 
 .path-separator {
