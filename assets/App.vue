@@ -357,17 +357,6 @@ export default {
     }
   },
 
-  methods: {
-    updatePathWidth() {
-      const pathEl = this.$refs.pathWidthRef;
-      const containerEl = this.$refs.toolbarPathRef;
-      if (pathEl && containerEl) {
-        this.pathWidth = pathEl.offsetWidth;
-        this.containerWidth = containerEl.offsetWidth;
-      }
-    },
-  },
-
   computed: {
     filteredFiles() {
       let files = this.files;
@@ -437,6 +426,15 @@ export default {
   },
 
   methods: {
+    updatePathWidth() {
+      const pathEl = this.$refs.pathWidthRef;
+      const containerEl = this.$refs.toolbarPathRef;
+      if (pathEl && containerEl) {
+        this.pathWidth = pathEl.offsetWidth;
+        this.containerWidth = containerEl.offsetWidth;
+      }
+    },
+
     navigateToPath(path) {
       this.cwd = path;
     },
