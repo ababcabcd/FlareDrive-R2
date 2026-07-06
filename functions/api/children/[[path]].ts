@@ -24,7 +24,7 @@ export async function onRequestGet(context) {
       include: ["httpMetadata", "customMetadata"],
     });
     let objKeys = objList.objects
-      .filter((obj) => !obj.key.endsWith("/_$folder$"))
+      .filter((obj) => !obj.key.endsWith("/_$folder$") && !obj.key.endsWith("/"))
       .map((obj) => {
         const { key, size, uploaded, httpMetadata, customMetadata } = obj;
         return { key, size, uploaded, httpMetadata, customMetadata };

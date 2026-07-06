@@ -1,3 +1,4 @@
 node_modules/
 *.local
 .dev.vars
+wrangler.toml
