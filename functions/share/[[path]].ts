@@ -34,6 +34,11 @@ export async function onRequestGet(context) {
       max-width: 500px;
       width: 100%;
       text-align: center;
+      transition: max-width 0.3s ease;
+    }
+    
+    .container.media {
+      max-width: 900px;
     }
     
     .icon {
@@ -105,8 +110,43 @@ export async function onRequestGet(context) {
       word-break: break-all;
     }
     
-    .download-btn {
+    .preview-area {
+      margin-bottom: 20px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 200px;
+    }
+    
+    .preview-image {
       width: 100%;
+      max-height: 70vh;
+      object-fit: contain;
+      display: block;
+    }
+    
+    .preview-video {
+      width: 100%;
+      max-height: 70vh;
+      outline: none;
+    }
+    
+    .preview-audio {
+      width: 100%;
+      outline: none;
+      margin: 20px 0;
+    }
+    
+    .btn-row {
+      display: flex;
+      gap: 12px;
+    }
+    
+    .download-btn {
+      flex: 1;
       padding: 14px 24px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
@@ -165,60 +205,93 @@ export async function onRequestGet(context) {
   </div>
   
   <script>
-    const token = "${token}";
+    var token = "${token}";
+    var fileUrl = '/api/share/download/?token=' + token;
+    
+    function isImage(type) { return type && /^image\\//.test(type); }
+    function isVideo(type) { return type && /^video\\//.test(type); }
+    function isAudio(type) { return type && /^audio\\//.test(type); }
+    function isMedia(type) { return isImage(type) || isVideo(type) || isAudio(type); }
+    
+    function getIcon(type) {
+      if (isImage(type)) return '🖼️';
+      if (isVideo(type)) return '🎬';
+      if (isAudio(type)) return '🎵';
+      return '📁';
+    }
+    
+    function getLabel(type) {
+      if (isImage(type)) return '图片';
+      if (isVideo(type)) return '视频';
+      if (isAudio(type)) return '音频';
+      return '文件';
+    }
     
     async function validateShare() {
-      const response = await fetch(\`/api/share/?token=\${token}\`);
-      const data = await response.json();
+      var response = await fetch('/api/share/?token=' + token);
+      var data = await response.json();
       
-      const app = document.getElementById('app');
+      var app = document.getElementById('app');
       
       if (data.valid) {
-        app.innerHTML = \`
-          <div class="icon success-icon">📁</div>
-          <h1>文件分享</h1>
-          <p>点击下方按钮下载文件</p>
-          <div class="file-info">
-            <div>
-              <span class="file-label">文件名</span>
-              <span class="file-value">\${data.fileName}</span>
-            </div>
-            <div>
-              <span class="file-label">文件大小</span>
-              <span class="file-value">\${formatSize(data.size)}</span>
-            </div>
-          </div>
-          <button class="download-btn" onclick="downloadFile()">
-            <span class="btn-icon">⬇️</span>
-            <span>下载文件</span>
-          </button>
-        \`;
+        var icon = getIcon(data.contentType);
+        var label = getLabel(data.contentType);
+        
+        if (isMedia(data.contentType)) {
+          app.classList.add('media');
+          
+          var previewHtml = '';
+          if (isImage(data.contentType)) {
+            previewHtml = '<div class="preview-area"><img src="' + fileUrl + '" alt="' + data.fileName + '" class="preview-image" onerror="this.parentElement.innerHTML=\\'<p style=color:#999;padding:40px>图片加载失败</p>\\'"></div>';
+          } else if (isVideo(data.contentType)) {
+            previewHtml = '<div class="preview-area"><video src="' + fileUrl + '" controls autoplay preload="metadata" playsinline class="preview-video" onerror="this.parentElement.innerHTML=\\'<p style=color:#999;padding:40px>视频加载失败</p>\\'"></video></div>';
+          } else if (isAudio(data.contentType)) {
+            previewHtml = '<audio src="' + fileUrl + '" controls autoplay class="preview-audio" onerror="this.style.display=\\'none\\'"></audio>';
+          }
+          
+          app.innerHTML = 
+            previewHtml +
+            '<div class="file-info">' +
+              '<div><span class="file-label">文件名</span><span class="file-value">' + data.fileName + '</span></div>' +
+              '<div><span class="file-label">文件大小</span><span class="file-value">' + formatSize(data.size) + '</span></div>' +
+            '</div>' +
+            '<button class="download-btn" onclick="downloadFile()">' +
+              '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
+            '</button>';
+        } else {
+          app.innerHTML = 
+            '<div class="icon success-icon">📁</div>' +
+            '<h1>文件分享</h1>' +
+            '<p>点击下方按钮下载文件</p>' +
+            '<div class="file-info">' +
+              '<div><span class="file-label">文件名</span><span class="file-value">' + data.fileName + '</span></div>' +
+              '<div><span class="file-label">文件大小</span><span class="file-value">' + formatSize(data.size) + '</span></div>' +
+            '</div>' +
+            '<button class="download-btn" onclick="downloadFile()">' +
+              '<span class="btn-icon">⬇️</span><span>下载文件</span>' +
+            '</button>';
+        }
       } else {
-        app.innerHTML = \`
-          <div class="icon error-icon">❌</div>
-          <h1>分享链接无效</h1>
-          <div class="error-box">
-            <p>\${data.message}</p>
-          </div>
-          <button class="download-btn expired" disabled>
-            <span>链接已失效</span>
-          </button>
-        \`;
+        app.innerHTML = 
+          '<div class="icon error-icon">❌</div>' +
+          '<h1>分享链接无效</h1>' +
+          '<div class="error-box"><p>' + data.message + '</p></div>' +
+          '<button class="download-btn expired" disabled><span>链接已失效</span></button>';
       }
     }
     
     function downloadFile() {
-      window.location.href = \`/api/share/download/?token=\${token}\`;
+      window.location.href = fileUrl;
     }
     
     function formatSize(size) {
-      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let i = 0;
+      var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      var i = 0;
       while (size >= 1024) {
         size /= 1024;
         i++;
       }
-      return \`\${size.toFixed(1)} \${units[i]}\`;
+      return size.toFixed(1) + ' ' + units[i];
     }
     
     validateShare();

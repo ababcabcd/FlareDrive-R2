@@ -119,8 +119,8 @@ export async function onRequestGet(context: any) {
   if (path && path.startsWith("_$flaredrive$/thumbnails/")) {
     headers.set("Cache-Control", "max-age=31536000");
   } else if (isStreamable(contentType)) {
-    // 流媒体文件使用 no-cache，确保每次请求都验证（ETag/Last-Modified 做条件请求）
-    headers.set("Cache-Control", "no-cache");
+    // 流媒体文件使用短缓存覆盖单次播放的所有 Range 请求，减少回源延迟
+    headers.set("Cache-Control", "max-age=300, must-revalidate");
     // 保留 ETag 和 Last-Modified 让浏览器可以做条件请求
   }
 

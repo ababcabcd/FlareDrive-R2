@@ -344,7 +344,8 @@
         <div class="player-body">
           <img v-if="playerSrc && playerType === 'image'" :src="playerSrc" :alt="playerName" class="player-image"
             @error="console.error('图片加载失败', $event.target.error)" />
-          <video v-else-if="playerSrc && playerType === 'video'" :src="playerSrc" controls autoplay class="player-video"
+          <video v-else-if="playerSrc && playerType === 'video'" :src="playerSrc" controls autoplay
+            preload="metadata" playsinline class="player-video"
             @error="console.error('媒体加载失败', $event.target.error)"></video>
           <audio v-else-if="playerSrc && playerType === 'audio'" :src="playerSrc" controls autoplay class="player-audio"
             @error="console.error('媒体加载失败', $event.target.error)"></audio>
@@ -352,6 +353,7 @@
       </div>
     </div>
     <Footer />
+    <div v-if="toastVisible" class="toast" v-text="toastMessage"></div>
   </div>
 </template>
 
@@ -400,7 +402,9 @@ export default {
     showPlayer: false,
     playerSrc: '',
     playerName: '',
-    playerType: ''
+    playerType: '',
+    toastVisible: false,
+    toastMessage: ''
   }),
 
   mounted() {
@@ -593,7 +597,7 @@ export default {
     copyShareLink() {
       if (this.shareLink) {
         navigator.clipboard.writeText(this.shareLink);
-        alert("分享链接已复制到剪贴板");
+        this.showToast("已复制到剪贴板");
       }
     },
 
@@ -617,7 +621,16 @@ export default {
 
     copyShareUrl(url) {
       navigator.clipboard.writeText(url);
-      alert("分享链接已复制到剪贴板");
+      this.showToast("已复制到剪贴板");
+    },
+
+    showToast(message) {
+      this.toastMessage = message;
+      this.toastVisible = true;
+      clearTimeout(this._toastTimer);
+      this._toastTimer = setTimeout(() => {
+        this.toastVisible = false;
+      }, 2000);
     },
 
     async deleteShare(shareId) {
@@ -1772,5 +1785,24 @@ export default {
   max-width: 500px;
   margin: 0 auto;
   outline: none;
+}
+
+.toast {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 10000;
+  animation: toast-in 0.3s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 </style>
