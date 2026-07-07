@@ -44,13 +44,20 @@ export async function onRequestOptions(context: any) {
   });
 }
 
+// 构造 PUBURL 的完整 URL（处理中文等特殊字符的编码）
+function getPubUrl(context: any): string {
+  const requestUrl = new URL(context.request.url);
+  const filePath = requestUrl.pathname.replace(/^\/raw\//, "");
+  return new URL(filePath, context.env["PUBURL"]).href;
+}
+
 // HEAD 请求 — 返回文件元信息（大小、类型、是否支持 Range）
 export async function onRequestHead(context: any) {
   const authError = checkAuth(context);
   if (authError) return authError;
 
   const [bucket, path] = parseBucketPath(context);
-  const url = context.env["PUBURL"] + "/" + context.request.url.split("/raw/")[1];
+  const url = getPubUrl(context);
 
   const response = await fetch(new Request(url, {
     method: "HEAD",
@@ -84,7 +91,7 @@ export async function onRequestGet(context: any) {
   if (authError) return authError;
 
   const [bucket, path] = parseBucketPath(context);
-  const url = context.env["PUBURL"] + "/" + context.request.url.split("/raw/")[1];
+  const url = getPubUrl(context);
 
   // 转发客户端的所有请求头（包括 Range）到 R2
   const fetchHeaders = new Headers(context.request.headers);
