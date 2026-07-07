@@ -159,7 +159,7 @@
           </div>
         </li>
         <li v-for="file in filteredFiles" :key="file.key">
-          <div @click="preview(`/raw/${file.key}`)" @contextmenu.prevent="
+          <div @click="preview(`/raw/${file.key}`, file.httpMetadata.contentType)" @contextmenu.prevent="
             showContextMenu = true;
           focusedItem = file;" class="file-item" style="position: relative;">
             <MimeIcon :content-type="file.httpMetadata.contentType" :thumbnail="file.customMetadata.thumbnail
@@ -334,6 +334,23 @@
         </div>
       </div>
     </div>
+    <!-- 内建视频/音频播放器 -->
+    <div v-if="showPlayer" class="player-overlay" @click.self="showPlayer = false">
+      <div class="player-container">
+        <div class="player-header">
+          <span class="player-title" v-text="playerName"></span>
+          <button class="player-close" @click="showPlayer = false">✕</button>
+        </div>
+        <div class="player-body">
+          <img v-if="playerSrc && playerType === 'image'" :src="playerSrc" :alt="playerName" class="player-image"
+            @error="console.error('图片加载失败', $event.target.error)" />
+          <video v-else-if="playerSrc && playerType === 'video'" :src="playerSrc" controls autoplay class="player-video"
+            @error="console.error('媒体加载失败', $event.target.error)"></video>
+          <audio v-else-if="playerSrc && playerType === 'audio'" :src="playerSrc" controls autoplay class="player-audio"
+            @error="console.error('媒体加载失败', $event.target.error)"></audio>
+        </div>
+      </div>
+    </div>
     <Footer />
   </div>
 </template>
@@ -379,7 +396,11 @@ export default {
     shares: [],
     sharesLoading: false,
     pathWidth: 0,
-    containerWidth: 0
+    containerWidth: 0,
+    showPlayer: false,
+    playerSrc: '',
+    playerName: '',
+    playerType: ''
   }),
 
   mounted() {
@@ -391,11 +412,19 @@ export default {
     if (containerEl) {
       this.resizeObserver.observe(containerEl);
     }
+    // Esc 关闭播放器
+    this._keyHandler = (e) => {
+      if (e.key === 'Escape' && this.showPlayer) this.showPlayer = false;
+    };
+    document.addEventListener('keydown', this._keyHandler);
   },
 
   beforeUnmount() {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
+    }
+    if (this._keyHandler) {
+      document.removeEventListener('keydown', this._keyHandler);
     }
   },
 
@@ -706,8 +735,18 @@ export default {
       fileElement.value = null;
     },
 
-    preview(filePath) {
-      window.open(filePath);
+    preview(filePath, contentType) {
+      // 图片/视频/音频在当前窗口用内建查看器打开
+      if (contentType && /^(image\/|video\/|audio\/|application\/ogg)/.test(contentType)) {
+        this.playerSrc = filePath;
+        this.playerName = filePath.split('/').pop();
+        if (contentType.startsWith('image/')) this.playerType = 'image';
+        else if (contentType.startsWith('audio/')) this.playerType = 'audio';
+        else this.playerType = 'video';
+        this.showPlayer = true;
+      } else {
+        window.open(filePath);
+      }
     },
 
     async pasteFile() {
@@ -1650,5 +1689,88 @@ export default {
 .delete-share-btn:hover {
   background: #c82333;
 }
+
+/* 内建视频播放器 */
+.player-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-container {
+  width: 90vw;
+  max-width: 1200px;
+  max-height: 90vh;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #1a1a1a;
+  color: #ccc;
+}
+
+.player-title {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.player-close {
+  background: none;
+  border: none;
+  color: #ccc;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.player-close:hover {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
+
+.player-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+}
+
+.player-video {
+  max-width: 100%;
+  max-height: calc(90vh - 50px);
+  outline: none;
+}
+
+.player-image {
+  max-width: 100%;
+  max-height: calc(90vh - 50px);
+  object-fit: contain;
+  cursor: zoom-out;
+}
+
+.player-audio {
+  width: 80%;
+  max-width: 500px;
+  margin: 0 auto;
+  outline: none;
+}
 </style>
-test
