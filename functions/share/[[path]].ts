@@ -42,6 +42,7 @@ export async function onRequestGet(context) {
     
     .container.media {
       max-width: 900px;
+      height: calc(100vh - 40px);
       overflow-y: hidden;
       display: flex;
       flex-direction: column;
@@ -124,7 +125,7 @@ export async function onRequestGet(context) {
       display: flex;
       align-items: center;
       justify-content: center;
-      flex: 1 1 auto;
+      flex: 1 1 0%;
       min-height: 0;
     }
     
