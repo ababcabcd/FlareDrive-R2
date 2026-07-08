@@ -13,6 +13,13 @@ function matchesAllowList(targetPath, allowList) {
   return allowList.some((allow) => targetPath.startsWith(allow));
 }
 
+// 从 Cookie 中提取 token
+function getTokenFromCookie(context) {
+  const cookieHeader = context.request.headers.get("Cookie") || "";
+  const match = cookieHeader.match(/(?:^|;\s*)flare_auth=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function getAllowListForRequest(context) {
   const headers = new Headers(context.request.headers);
   // 支持 X-Flare-Auth 自定义 header（前端 token 管理，绕过浏览器 Basic Auth 缓存）
@@ -25,6 +32,16 @@ function getAllowListForRequest(context) {
     if (account && context.env[account]) {
       return parseAllowList(context.env[account]);
     }
+  }
+  // Cookie 认证（用于浏览器原生请求如 <img>/<video>/<audio>）
+  const cookieToken = getTokenFromCookie(context);
+  if (cookieToken) {
+    try {
+      const account = atob(cookieToken);
+      if (account && context.env[account]) {
+        return parseAllowList(context.env[account]);
+      }
+    } catch {}
   }
   if (context.env["GUEST"]) {
     return parseAllowList(context.env["GUEST"]);
