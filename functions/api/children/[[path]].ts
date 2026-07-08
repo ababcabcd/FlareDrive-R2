@@ -3,7 +3,9 @@ import { can_access_path, get_allow_list } from "@/utils/auth";
 
 export async function onRequestGet(context) {
   try {
-    const [bucket, path] = parseBucketPath(context);
+    const [bucket, rawPath] = parseBucketPath(context);
+    // 去掉尾部斜杠，避免拼接出双斜杠前缀导致 R2 列表查不到结果
+    const path = rawPath ? rawPath.replace(/\/+$/, '') : '';
     const prefix = path && `${path}/`;
     if (!bucket || prefix.startsWith("_$flaredrive$/")) return notFound();
     const allowList = get_allow_list(context);

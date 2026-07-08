@@ -15,7 +15,11 @@ function matchesAllowList(targetPath, allowList) {
 
 function getAllowListForRequest(context) {
   const headers = new Headers(context.request.headers);
-  const authorization = headers.get("Authorization");
+  // 支持 X-Flare-Auth 自定义 header（前端 token 管理，绕过浏览器 Basic Auth 缓存）
+  const flareAuth = headers.get("X-Flare-Auth");
+  const authorization = flareAuth
+    ? `Basic ${flareAuth}`
+    : headers.get("Authorization");
   if (authorization && authorization.startsWith("Basic ")) {
     const account = atob(authorization.split("Basic ")[1]);
     if (account && context.env[account]) {

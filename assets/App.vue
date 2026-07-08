@@ -1,5 +1,42 @@
 <template>
-  <div class="main" 
+  <!-- 自定义登录表单 -->
+  <div v-if="showLogin" class="login-overlay">
+    <div class="login-card">
+      <div class="login-header">
+        <img src="/assets/homescreen.webp" alt="PAN" style="height: 48px" />
+        <h2>PAN 网盘</h2>
+      </div>
+      <form class="login-form" @submit.prevent="doLogin">
+        <div class="login-field">
+          <label>用户名</label>
+          <input
+            type="text"
+            v-model="loginUsername"
+            placeholder="请输入用户名"
+            autocomplete="username"
+            :disabled="loginLoading"
+          />
+        </div>
+        <div class="login-field">
+          <label>密码</label>
+          <input
+            type="password"
+            v-model="loginPassword"
+            placeholder="请输入密码"
+            autocomplete="current-password"
+            :disabled="loginLoading"
+            @keyup.enter="doLogin"
+          />
+        </div>
+        <div v-if="loginError" class="login-error">{{ loginError }}</div>
+        <button type="submit" class="login-btn" :disabled="loginLoading">
+          {{ loginLoading ? '登录中...' : '登录' }}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div v-show="!showLogin" class="main" 
       @dragenter.prevent 
       @dragover.prevent 
       @drop.prevent="onDrop"
@@ -31,15 +68,6 @@
       />
       <div class="menu-button">
         <button class="circle" @click="showMenu = true" style="display: flex; align-items: center;background-color: rgb(245, 245, 245);">
-          <p style="
-              white-space: nowrap;
-              margin: 0 10px 0 0;
-              font-size: 16px;
-              font-family: '寒蝉半圆体', -apple-system, BlinkMacSystemFont, 'Segoe UI Adjusted',
-    'Segoe UI', 'Liberation Sans', sans-serif;"
-              class="menu-button-text">
-            菜单
-          </p>
           <svg t="1741761597964" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
             p-id="22027" width="24" height="24">
             <path
@@ -48,7 +76,7 @@
           </svg>
         </button>
         <Menu v-model="showMenu"
-          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '粘贴文件到网盘' }]"
+          :items="[{ text: '按照名称排序A-Z' }, { text: '按照大小递增排序' }, { text: '按照大小递减排序' }, { text: '退出登录' }]"
           @click="onMenuClick" />
       </div>
     </div>
@@ -404,7 +432,13 @@ export default {
     playerName: '',
     playerType: '',
     toastVisible: false,
-    toastMessage: ''
+    toastMessage: '',
+    // 自定义登录（必须在 data() 中初始化，因为 watch immediate 在 created 之前执行）
+    showLogin: !sessionStorage.getItem('flare_auth'),
+    loginUsername: '',
+    loginPassword: '',
+    loginError: '',
+    loginLoading: false,
   }),
 
   mounted() {
@@ -429,16 +463,6 @@ export default {
     }
     if (this._keyHandler) {
       document.removeEventListener('keydown', this._keyHandler);
-    }
-  },
-
-  watch: {
-    cwd() {
-      this.$nextTick(() => {
-        requestAnimationFrame(() => {
-          this.updatePathWidth();
-        });
-      });
     }
   },
 
@@ -541,7 +565,7 @@ export default {
           url.searchParams.set('q', query);
           url.searchParams.set('path', '');
           
-          const res = await fetch(url);
+          const res = await this.apiFetch(url);
           if (res.ok) {
             const data = await res.json();
             this.searchResults = data.results || [];
@@ -660,7 +684,7 @@ export default {
         await axios.put(uploadUrl, "");
         this.fetchFiles();
       } catch (error) {
-        fetch("/api/write/")
+        this.apiFetch("/api/write/")
           .then((value) => {
             if (value.redirected) window.location.href = value.url;
           })
@@ -669,11 +693,59 @@ export default {
       }
     },
 
+    // apiFetch: 统一请求封装，用 credentials:'omit' 防止浏览器自动发送缓存的 Basic Auth 凭证
+    // 改为从 sessionStorage 读取 token 放在 X-Flare-Auth 自定义 header 中发送
+    apiFetch(url, options = {}) {
+      const token = sessionStorage.getItem('flare_auth');
+      const headers = { ...(options.headers || {}) };
+      if (token) {
+        headers['X-Flare-Auth'] = token;
+      }
+      return fetch(url, {
+        ...options,
+        credentials: 'omit',
+        headers,
+      });
+    },
+
+    // 自定义登录：用户输入凭据 → 前端生成 token → 发送到后端验证 → 成功则存入 sessionStorage
+    async doLogin() {
+      this.loginError = '';
+      if (!this.loginUsername || !this.loginPassword) {
+        this.loginError = '请输入用户名和密码';
+        return;
+      }
+      this.loginLoading = true;
+      try {
+        const token = btoa(this.loginUsername + ':' + this.loginPassword);
+        const res = await fetch('/api/children/', {
+          credentials: 'omit',
+          headers: { 'X-Flare-Auth': token },
+        });
+        if (res.ok) {
+          sessionStorage.setItem('flare_auth', token);
+          this.showLogin = false;
+          this.loginUsername = '';
+          this.loginPassword = '';
+          await this.$nextTick();
+          this.fetchFiles();
+        } else if (res.status === 401) {
+          this.loginError = '用户名或密码错误';
+        } else {
+          this.loginError = '登录失败，请重试 (' + res.status + ')';
+        }
+      } catch (e) {
+        this.loginError = '网络错误，请检查连接';
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+
     fetchFiles() {
       this.files = [];
       this.folders = [];
       this.loading = true;
-      fetch(`/api/children/${this.cwd}`)
+      this.apiFetch(`/api/children/${this.cwd}`)
         .then((res) => {
           if (!res.ok) {
             this.loading = false;
@@ -727,8 +799,8 @@ export default {
         case "按照大小递减排序":
           this.order = "大小↓";
           break;
-        case "粘贴文件到网盘":
-          return this.pasteFile();
+        case "退出登录":
+          return this.logout();
       }
       this.files.sort((a, b) => {
         if (this.order === "大小↑") {
@@ -762,13 +834,9 @@ export default {
       }
     },
 
-    async pasteFile() {
-      if (!this.clipboard) return;
-      let newName = window.prompt("Rename to:");
-      if (newName === null) return;
-      if (newName === "") newName = this.clipboard.split("/").pop();
-      await this.copyPaste(this.clipboard, `${this.cwd}${newName}`);
-      this.fetchFiles();
+    logout() {
+      sessionStorage.clear();
+      location.reload();
     },
 
     async processUploadQueue() {
@@ -792,7 +860,7 @@ export default {
             await axios.put(thumbnailUploadUrl, thumbnailBlob);
             thumbnailDigest = digestHex;
           } catch (error) {
-            fetch("/api/write/")
+            this.apiFetch("/api/write/")
               .then((value) => {
                 if (value.redirected) window.location.href = value.url;
               })
@@ -822,7 +890,7 @@ export default {
           await axios.put(uploadUrl, file, { headers, onUploadProgress });
         }
       } catch (error) {
-        fetch("/api/write/")
+        this.apiFetch("/api/write/")
           .then((value) => {
             if (value.redirected) window.location.href = value.url;
           })
@@ -1058,7 +1126,7 @@ export default {
           url.searchParams.set('marker', marker);
         }
 
-        const response = await fetch(url);
+        const response = await this.apiFetch(url);
         const data = await response.json();
 
         // 添加文件（过滤掉_$folder$标记文件）
@@ -1092,7 +1160,7 @@ export default {
           url.searchParams.set('marker', marker);
         }
 
-        const response = await fetch(url);
+        const response = await this.apiFetch(url);
         const data = await response.json();
 
         // 添加当前目录的直接子文件夹
@@ -1125,7 +1193,13 @@ export default {
   watch: {
     cwd: {
       handler() {
+        if (this.showLogin) return;
         this.fetchFiles();
+        this.$nextTick(() => {
+          requestAnimationFrame(() => {
+            this.updatePathWidth();
+          });
+        });
         const url = new URL(window.location);
         if ((url.searchParams.get("p") || "") !== this.cwd) {
           this.cwd
@@ -1142,6 +1216,17 @@ export default {
   },
 
   created() {
+    // 初始化 axios：禁止浏览器自动发送缓存的 Basic Auth 凭证，
+    // 改为从 sessionStorage 读取 token 通过自定义 header 发送
+    axios.defaults.withCredentials = false;
+    axios.interceptors.request.use((config) => {
+      const token = sessionStorage.getItem('flare_auth');
+      if (token) {
+        config.headers = config.headers || {};
+        config.headers['X-Flare-Auth'] = token;
+      }
+      return config;
+    });
     window.addEventListener("popstate", (ev) => {
       const searchParams = new URL(window.location).searchParams;
       if (searchParams.get("p") !== this.cwd)
@@ -1804,5 +1889,103 @@ export default {
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 登录表单 */
+.login-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.login-card {
+  background: white;
+  border-radius: 16px;
+  padding: 40px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.login-header h2 {
+  margin: 12px 0 0;
+  font-size: 22px;
+  color: #333;
+  font-weight: 600;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+}
+
+.login-field input {
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 15px;
+  transition: border-color 0.2s;
+  outline: none;
+}
+
+.login-field input:focus {
+  border-color: #667eea;
+}
+
+.login-field input:disabled {
+  opacity: 0.6;
+  background: #f5f5f5;
+}
+
+.login-error {
+  color: #e74c3c;
+  font-size: 13px;
+  text-align: center;
+  padding: 8px;
+  background: #fdf0ef;
+  border-radius: 8px;
+}
+
+.login-btn {
+  padding: 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.login-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.login-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 </style>
