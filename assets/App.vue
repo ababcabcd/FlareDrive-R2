@@ -257,7 +257,7 @@
           </button>
         </li>
         <li>
-          <a :href="`/raw/${focusedItem.key}`" target="_blank" download>
+          <a :href="rawUrl(`/raw/${focusedItem.key}`)" target="_blank" download>
             <span>下载</span>
           </a>
         </li>
@@ -272,7 +272,7 @@
           </button>
         </li>
         <li>
-          <button @click="copyLink(`/raw/${focusedItem.key}`)">
+          <button @click="copyLink(rawUrl(`/raw/${focusedItem.key}`))">
             <span>复制链接</span>
           </button>
         </li>
@@ -823,15 +823,22 @@ export default {
     preview(filePath, contentType) {
       // 图片/视频/音频在当前窗口用内建查看器打开
       if (contentType && /^(image\/|video\/|audio\/|application\/ogg)/.test(contentType)) {
-        this.playerSrc = filePath;
+        this.playerSrc = this.rawUrl(filePath);
         this.playerName = filePath.split('/').pop();
         if (contentType.startsWith('image/')) this.playerType = 'image';
         else if (contentType.startsWith('audio/')) this.playerType = 'audio';
         else this.playerType = 'video';
         this.showPlayer = true;
       } else {
-        window.open(filePath);
+        window.open(this.rawUrl(filePath));
       }
+    },
+
+    // 给 /raw/ 链接加上 ?token=xxx 参数，让浏览器原生请求也能携带认证
+    rawUrl(path) {
+      const token = sessionStorage.getItem('flare_auth');
+      if (!token) return path;
+      return path + '?token=' + encodeURIComponent(token);
     },
 
     logout() {
