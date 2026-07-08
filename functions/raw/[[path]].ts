@@ -1,16 +1,6 @@
 import { notFound, parseBucketPath } from "@/utils/bucket";
 import { can_access_path } from "@/utils/auth";
 
-// 常见的视频/音频 MIME 类型，这些文件需要支持流式播放
-const STREAMABLE_TYPES = [
-  "video/", "audio/", "application/ogg",
-];
-
-function isStreamable(contentType: string | null): boolean {
-  if (!contentType) return false;
-  return STREAMABLE_TYPES.some((t) => contentType!.startsWith(t));
-}
-
 function buildCorsHeaders(): Headers {
   const headers = new Headers();
   headers.set("Access-Control-Allow-Origin", "*");
@@ -85,49 +75,20 @@ export async function onRequestHead(context: any) {
   });
 }
 
-// GET 请求 — 支持 Range 的流式文件服务
+// GET 请求 — 302 重定向到 CDN，浏览器直接向 R2 发起 Range 请求
+// 省去 Worker 流式透传开销，R2 原生支持 Range，视频/音频拖动进度条不受影响
 export async function onRequestGet(context: any) {
   const authError = checkAuth(context);
   if (authError) return authError;
 
-  const [bucket, path] = parseBucketPath(context);
   const url = getPubUrl(context);
 
-  // 转发客户端的所有请求头（包括 Range）到 R2
-  const fetchHeaders = new Headers(context.request.headers);
-  // 移除 host 头，避免 host 不匹配导致的问题
-  fetchHeaders.delete("host");
+  const headers = buildCorsHeaders();
+  headers.set("Location", url);
+  headers.set("Cache-Control", "no-cache");
 
-  const response = await fetch(new Request(url, {
-    headers: fetchHeaders,
-    method: "GET",
-    redirect: "follow",
-  }));
-
-  const headers = new Headers(response.headers);
-  const corsHeaders = buildCorsHeaders();
-  corsHeaders.forEach((v, k) => headers.set(k, v));
-
-  const contentType = headers.get("Content-Type");
-
-  // 确保告知客户端支持 Range 请求（流式播放的关键）
-  if (!headers.has("Accept-Ranges")) {
-    headers.set("Accept-Ranges", "bytes");
-  }
-
-  // 缩略图长期缓存
-  if (path && path.startsWith("_$flaredrive$/thumbnails/")) {
-    headers.set("Cache-Control", "max-age=31536000");
-  } else if (isStreamable(contentType)) {
-    // 流媒体文件使用短缓存覆盖单次播放的所有 Range 请求，减少回源延迟
-    headers.set("Cache-Control", "max-age=300, must-revalidate");
-    // 保留 ETag 和 Last-Modified 让浏览器可以做条件请求
-  }
-
-  // 206 响应不做额外缓存处理，R2 已正确设置相关头
-  return new Response(response.body, {
+  return new Response(null, {
+    status: 302,
     headers,
-    status: response.status,
-    statusText: response.statusText,
   });
 }
