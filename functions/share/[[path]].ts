@@ -19,7 +19,8 @@ export async function onRequestGet(context) {
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -35,10 +36,15 @@ export async function onRequestGet(context) {
       width: 100%;
       text-align: center;
       transition: max-width 0.3s ease;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
     }
     
     .container.media {
       max-width: 900px;
+      overflow-y: hidden;
+      display: flex;
+      flex-direction: column;
     }
     
     .icon {
@@ -118,31 +124,37 @@ export async function onRequestGet(context) {
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 200px;
+      flex: 1 1 auto;
+      min-height: 0;
     }
     
     .preview-image {
       width: 100%;
-      max-height: 70vh;
+      max-height: 100%;
       object-fit: contain;
       display: block;
     }
     
     .preview-video {
       width: 100%;
-      max-height: 70vh;
+      max-height: 100%;
       outline: none;
     }
     
     .preview-audio {
       width: 100%;
       outline: none;
-      margin: 20px 0;
+      flex-shrink: 0;
+      margin: 10px 0;
     }
     
     .btn-row {
       display: flex;
       gap: 12px;
+    }
+    
+    .container.media .download-btn {
+      flex: 0 0 auto;
     }
     
     .download-btn {
