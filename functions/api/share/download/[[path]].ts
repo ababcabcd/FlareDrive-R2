@@ -122,90 +122,22 @@ export async function onRequestGet(context: any) {
     const { metadata, errorResponse } = await validateAndGetMetadata(bucket, token);
     if (errorResponse) return errorResponse;
 
-    // 先获取文件元数据（总大小）
+    // 确认文件存在
     const headObj = await bucket.head(metadata.key);
     if (!headObj) {
       return new Response("文件不存在", { status: 404 });
     }
 
-    const totalSize = headObj.size;
-    const contentType = headObj.httpMetadata?.contentType || "application/octet-stream";
-    const fileName = metadata.key.split("/").pop() || "download";
-
-    const headers = new Headers();
-    headers.set("Content-Type", contentType);
-    headers.set("Accept-Ranges", "bytes");
-    headers.set("Cache-Control", "no-cache");
-
-    // 合并 CORS 头
-    const corsHeaders = buildCorsHeaders();
-    corsHeaders.forEach((v, k) => headers.set(k, v));
-
-    // 处理 Range 请求 — 支持流式播放（边下边播）
-    const rangeHeader = context.request.headers.get("Range");
-    if (rangeHeader) {
-      const rangeMatch = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-      if (rangeMatch) {
-        const start = parseInt(rangeMatch[1], 10);
-        let end: number;
-
-        if (rangeMatch[2] !== undefined && rangeMatch[2] !== "") {
-          end = parseInt(rangeMatch[2], 10);
-        } else {
-          // 开放结尾：Range: bytes=0- → 返回从 start 到文件末尾
-          end = totalSize - 1;
-        }
-
-        // 边界校验
-        if (start >= totalSize) {
-          return new Response("Range Not Satisfiable", {
-            status: 416,
-            headers: {
-              "Content-Range": `bytes */${totalSize}`,
-              ...Object.fromEntries(headers.entries()),
-            },
-          });
-        }
-
-        // 确保 end 不超出文件大小
-        end = Math.min(end, totalSize - 1);
-        const length = end - start + 1;
-
-        // 使用 R2 绑定的 range 参数获取部分内容
-        const rangedObj = await bucket.get(metadata.key, {
-          range: { offset: start, length },
-        });
-
-        if (!rangedObj) {
-          return new Response("文件不存在", { status: 404 });
-        }
-
-        headers.set("Content-Range", `bytes ${start}-${end}/${totalSize}`);
-        headers.set("Content-Length", length.toString());
-
-        // 增量下载计数（Range 请求也计入下载）
-        await incrementDownloadCount(bucket, token, metadata, context);
-
-        return new Response(rangedObj.body, {
-          status: 206,
-          statusText: "Partial Content",
-          headers,
-        });
-      }
-    }
-
-    // 无 Range 请求 — 全量下载
-    const obj = await bucket.get(metadata.key);
-    if (!obj) {
-      return new Response("文件不存在", { status: 404 });
-    }
-
-    headers.set("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
-    headers.set("Content-Length", totalSize.toString());
-
+    // 递增下载计数后，302 重定向到 CDN，浏览器直接与 R2 交互
     await incrementDownloadCount(bucket, token, metadata, context);
 
-    return new Response(obj.body, { status: 200, headers });
+    const pubUrl = new URL(metadata.key, context.env["PUBURL"]).href;
+
+    const headers = buildCorsHeaders();
+    headers.set("Location", pubUrl);
+    headers.set("Cache-Control", "no-cache");
+
+    return new Response(null, { status: 302, headers });
   } catch (e: any) {
     return new Response("无效的分享链接", { status: 400 });
   }
