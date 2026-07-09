@@ -817,8 +817,6 @@ export default {
     },
 
     fetchFiles() {
-      this.files = [];
-      this.folders = [];
       this.loading = true;
       this.apiFetch(`/api/children/${this.cwd}`)
         .then((res) => {
@@ -1040,9 +1038,9 @@ export default {
       // 模拟值抢先冲到 95% 并因守卫条件掩盖真实进度（表现为卡在 95%）。
       // 声明在 try 外，确保 catch / 取消分支都能 clearInterval。
       let simulateTimer = null;
-      let lastRealProgressAt = 0;
+      let lastRealProgressAt = Date.now();
       try {
-        this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
+        this.uploadProgressLabel = `服务器接收处理中，${uploadFile.name} ...`;
         this.uploadProgress = 0;
         const uploadUrl = `/api/write/items/${basedir}${uploadFile.name}`;
         const headers = {};
