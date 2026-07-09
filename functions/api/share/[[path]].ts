@@ -3,6 +3,25 @@ import { can_access_path } from "@/utils/auth";
 
 const SHARES_PREFIX = "_$flaredrive$/shares/";
 
+// 根据扩展名兜底映射 MIME 类型（R2 上传时可能存成 application/octet-stream）
+const EXT_TO_MIME: Record<string, string> = {
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
+  webm: 'video/webm', ogv: 'video/ogg', ogg: 'video/ogg',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+  aac: 'audio/aac', m4a: 'audio/mp4', oga: 'audio/ogg',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  svg: 'image/svg+xml', avif: 'image/avif',
+};
+
+function resolveContentType(name: string, contentType?: string): string {
+  if (contentType && contentType !== 'application/octet-stream') {
+    return contentType;
+  }
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return EXT_TO_MIME[ext] || contentType || 'application/octet-stream';
+}
+
 interface ShareMetadata {
   key: string;
   expiresAt: number | undefined;
@@ -119,12 +138,13 @@ export async function onRequestGet(context) {
       });
     }
 
+    const fileName = metadata.key.split("/").pop() || "";
     return new Response(JSON.stringify({
       valid: true,
       path: metadata.key,
-      fileName: metadata.key.split("/").pop(),
+      fileName,
       size: obj.size,
-      contentType: obj.httpMetadata?.contentType,
+      contentType: resolveContentType(fileName, obj.httpMetadata?.contentType),
       currentDownloads: metadata.currentDownloads,
       maxDownloads: metadata.maxDownloads,
     }), {

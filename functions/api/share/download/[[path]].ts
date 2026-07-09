@@ -2,6 +2,25 @@ import { notFound, parseBucketPath } from "@/utils/bucket";
 
 const SHARES_PREFIX = "_$flaredrive$/shares/";
 
+// 根据扩展名兜底映射 MIME 类型（R2 上传时可能存成 application/octet-stream）
+const EXT_TO_MIME: Record<string, string> = {
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
+  webm: 'video/webm', ogv: 'video/ogg', ogg: 'video/ogg',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+  aac: 'audio/aac', m4a: 'audio/mp4', oga: 'audio/ogg',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  svg: 'image/svg+xml', avif: 'image/avif',
+};
+
+function resolveContentType(name: string, contentType?: string): string {
+  if (contentType && contentType !== 'application/octet-stream') {
+    return contentType;
+  }
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return EXT_TO_MIME[ext] || contentType || 'application/octet-stream';
+}
+
 interface ShareMetadata {
   key: string;
   expiresAt: number | undefined;
@@ -196,9 +215,15 @@ export async function onRequestGet(context: any) {
       headers.set("Accept-Ranges", "bytes");
     }
 
+    // 如果 R2/CDN 返回的 Content-Type 是 octet-stream 或缺失，按扩展名兜底修正
+    const fileName = metadata.key.split('/').pop() || '';
+    const resolvedType = resolveContentType(fileName, headers.get('Content-Type') || headObj.httpMetadata?.contentType);
+    if (resolvedType) {
+      headers.set('Content-Type', resolvedType);
+    }
+
     // 视频/音频流式请求不设置 Content-Disposition，避免影响播放器内联解析 Range 响应
     if (!isMediaRequest) {
-      const fileName = metadata.key.split('/').pop();
       if (fileName) {
         headers.set("Content-Disposition", encodeContentDisposition(fileName));
       }
