@@ -1035,10 +1035,12 @@ export default {
         }
       }
 
-      // 模拟进度兜底：Safari / localhost 下 XHR 往往只触发一次 100% 进度事件，
-      // 这里平滑推进到 95%，真实进度事件触发时会被覆盖。
+      // 模拟进度兜底：Safari / localhost 下 XHR 只触发一次 100% 进度事件，需平滑推进。
+      // 关键：仅在「真实进度超过 400ms 未更新」时才用模拟值兜底，避免真实网络下
+      // 模拟值抢先冲到 95% 并因守卫条件掩盖真实进度（表现为卡在 95%）。
       // 声明在 try 外，确保 catch / 取消分支都能 clearInterval。
       let simulateTimer = null;
+      let lastRealProgressAt = 0;
       try {
         this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
         this.uploadProgress = 0;
@@ -1046,19 +1048,20 @@ export default {
         const headers = {};
 
         simulateTimer = setInterval(() => {
-          const next = Math.min(this.uploadProgress + 4, 95);
-          if (next > this.uploadProgress) this.uploadProgress = next;
+          // 真实进度在流动时（真实网络）不干预，仅当停滞（Safari/localhost）时平滑推进
+          if (Date.now() - lastRealProgressAt > 400 && this.uploadProgress < 95) {
+            this.uploadProgress = Math.min(this.uploadProgress + 4, 95);
+          }
         }, 150);
 
         const onUploadProgress = (progressEvent) => {
           if (progressEvent.total) {
             const pct = (progressEvent.loaded * 100) / progressEvent.total;
             const capped = Math.min(pct, 98);
-            // 只在真实进度大于当前显示值时更新，避免被回退
-            if (capped > this.uploadProgress) {
-              this.uploadProgress = capped;
-              this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
-            }
+            // 真实进度优先，直接覆盖（不再用 > 守卫，避免被模拟值掩盖）
+            this.uploadProgress = capped;
+            this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
+            lastRealProgressAt = Date.now();
           }
         };
         if (thumbnailDigest) headers["fd-thumbnail"] = thumbnailDigest;
