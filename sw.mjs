@@ -275,11 +275,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // 仅拦截带 Range 头的请求（视频/音频流式播放 + 预取），其余请求（图片加载、
+  // 文件下载导航、整文件请求等）直接透传，避免 SW 中间跳增加不必要的延迟。
+  // Range 是 SW 缓存命中判断的必要条件：无 Range 的请求返回 200，不会被缓存，
+  // 经过 SW 反而多一跳 fetch，对图片等小文件拖慢明显。
+  const rangeHeader = event.request.headers.get('Range');
+  if (!rangeHeader) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
     (async () => {
-      // 对所有带 Range 的请求优先查缓存（不仅是 video/audio 元素请求），
-      // 这样预取 fetch 也能复用已缓存的 chunk，避免重复网络请求浪费带宽
-      const range = parseRange(event.request.headers.get('Range'));
+      const range = parseRange(rangeHeader);
       if (range) {
         const cached = await serveFromCache(url.href, range);
         if (cached) {
