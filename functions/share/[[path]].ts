@@ -448,7 +448,7 @@ export async function onRequestGet(context) {
               chunkReceived += result.value.length;
               received += result.value.length;
               var pct = total ? (received / total) * 100 : 0;
-              showDlProgress(pct, '下载 ' + shareFileName + ' ... ' + Math.round(pct) + '%');
+              showDlProgress(pct, '下载 ' + shareFileName + ' ...');
             }
             // 合并本分块并按顺序写入
             var buf = new Uint8Array(chunkReceived);

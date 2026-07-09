@@ -48,7 +48,7 @@
       <button class="upload-cancel-btn" title="取消上传" @click="cancelUpload">✕</button>
     </div>
     <div v-if="downloadProgress !== null" class="upload-progress-bar">
-      <span class="upload-progress-label">{{ downloadProgressLabel || '下载中' }} <em>{{ Math.round(downloadProgress) }}%</em></span>
+      <span class="upload-progress-label">{{ downloadProgressLabel || '下载中' }}</span>
       <progress :value="downloadProgress" max="100"></progress>
       <button class="upload-cancel-btn" title="取消下载" @click="cancelDownload">✕</button>
     </div>
