@@ -60,13 +60,6 @@ function parseByteRange(rangeHeader: string | null): ByteRange | null {
   return { start, end };
 }
 
-// 判断 Range 是否为显式小范围，可安全走 Worker 代理
-function isSmallRange(rangeHeader: string | null, maxBytes: number): boolean {
-  const range = parseByteRange(rangeHeader);
-  if (!range) return false;
-  return range.end - range.start + 1 <= maxBytes;
-}
-
 // 鉴权检查的公共逻辑
 function checkAuth(context: any): Response | null {
   const [bucket, path] = parseBucketPath(context);
@@ -136,9 +129,11 @@ export async function onRequestHead(context: any) {
   });
 }
 
-// GET 请求 — 浏览器原生 <video>/<audio> 的完整 GET/超大 Range 走 302 直连 CDN，
-// 中小 Range（seek、prefetch）走 Worker 代理，和 prefetch 共享缓存并确保 206 正确返回。
-// 其他请求（JS fetch 预取、图片、下载等）代理 R2 内容，确保 CORS 头完整返回。
+// GET 请求 — 浏览器原生 <video>/<audio> 请求全部走 Worker 代理：
+// - 无 Range：请求前 10MB，返回 206，浏览器据此获知文件大小并自行发送后续小范围请求
+// - 大 Range（如 Safari 的 2.9GB 整文件请求）：夹紧到 10MB，避免 302 重定向后跨域直连 CDN 下载整文件失败
+// - 中小 Range（seek / prefetch 的 2MB chunk）：原样转发
+// 一律不走 302，避免 Safari 跨域直连 CDN 时超大 Range 请求超时/断连导致的“失败请求”
 export async function onRequestGet(context: any) {
   const authError = checkAuth(context);
   if (authError) return authError;
@@ -147,26 +142,29 @@ export async function onRequestGet(context: any) {
   const request = context.request;
   const [_, path] = parseBucketPath(context);
 
-  // 浏览器原生 <video>/<audio> 请求处理策略：
-  // - 无 Range 或超大/开放式 Range（如 Safari 2.9GB）走 302 直连 CDN，避免 Worker 代理超时/断连。
-  // - 明确的中小 Range（seek、prefetch 的 2MB chunk 等）走 Worker 代理，和 prefetch 共享缓存，
-  //   并确保返回正确的 206 Partial Content，解决拖动进度条后无法播放的问题。
   const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
   const rangeHeader = request.headers.get('Range');
   const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio';
-  const MAX_PROXY_MEDIA_RANGE = 100 * 1024 * 1024; // 100MB
-
-  if (isMediaRequest && (!rangeHeader || !isSmallRange(rangeHeader, MAX_PROXY_MEDIA_RANGE))) {
-    const redirectHeaders = new Headers(buildCorsHeaders());
-    redirectHeaders.set('Location', url);
-    redirectHeaders.set('Cache-Control', 'no-cache');
-    return new Response(null, { status: 302, headers: redirectHeaders });
-  }
+  const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB 上限，避免浪费带宽
 
   const reqHeaders = new Headers(request.headers);
   reqHeaders.delete('host');
   reqHeaders.delete('origin');
   reqHeaders.delete('referer');
+
+  // 媒体请求：夹紧 Range，确保单次 CDN 请求不超过 10MB
+  if (isMediaRequest) {
+    const parsed = rangeHeader ? parseByteRange(rangeHeader) : null;
+    if (!parsed) {
+      // 无 Range 或格式不标准（如 bytes=0-）：请求前 10MB
+      reqHeaders.set('Range', `bytes=0-${MEDIA_CLAMP - 1}`);
+    } else if (parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+      // 超大 Range：夹紧到起始位置 + 10MB
+      const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
+      reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
+    }
+    // 小 Range：保持原样（已在 reqHeaders 中）
+  }
 
   const response = await fetch(new Request(url, {
     method: "GET",

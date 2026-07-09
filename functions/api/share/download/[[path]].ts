@@ -37,13 +37,6 @@ function parseByteRange(rangeHeader: string | null): ByteRange | null {
   return { start, end };
 }
 
-// 判断 Range 是否为显式小范围，可安全走 Worker 代理
-function isSmallRange(rangeHeader: string | null, maxBytes: number): boolean {
-  const range = parseByteRange(rangeHeader);
-  if (!range) return false;
-  return range.end - range.start + 1 <= maxBytes;
-}
-
 async function validateAndGetMetadata(bucket: any, token: string): Promise<{ metadata: ShareMetadata; errorResponse?: Response }> {
   const shareObject = await bucket.get(`${SHARES_PREFIX}${token}.json`);
   if (!shareObject) {
@@ -164,22 +157,30 @@ export async function onRequestGet(context: any) {
     const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
     const rangeHeader = request.headers.get('Range');
     const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio';
-    const MAX_PROXY_MEDIA_RANGE = 100 * 1024 * 1024; // 100MB
 
-    // 浏览器原生 <video>/<audio> 的完整 GET/超大/开放式 Range 走 302 直连 CDN；
-    // 中小 Range 走 Worker 代理，和 prefetch 共享缓存并确保 206 正确返回。
-    if (isMediaRequest && (!rangeHeader || !isSmallRange(rangeHeader, MAX_PROXY_MEDIA_RANGE))) {
-      const headers = buildCorsHeaders();
-      headers.set("Location", pubUrl);
-      headers.set("Cache-Control", "no-cache");
-      return new Response(null, { status: 302, headers });
-    }
+    // 浏览器原生 <video>/<audio> 请求全部走 Worker 代理：
+    // - 无 Range：请求前 10MB，返回 206
+    // - 大 Range（如 Safari 2.9GB 整文件请求）：夹紧到 10MB
+    // - 中小 Range：原样转发
+    // 一律不走 302，避免跨域直连 CDN 超大请求超时/断连
+    const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB
 
-    // 其他请求代理到 PUBURL，确保 CORS 头完整并设置正确的下载文件名
     const reqHeaders = new Headers(request.headers);
     reqHeaders.delete('host');
     reqHeaders.delete('origin');
     reqHeaders.delete('referer');
+
+    if (isMediaRequest) {
+      const parsed = rangeHeader ? parseByteRange(rangeHeader) : null;
+      if (!parsed) {
+        reqHeaders.set('Range', `bytes=0-${MEDIA_CLAMP - 1}`);
+      } else if (parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+        const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
+        reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
+      }
+    }
+
+    // 其他请求代理到 PUBURL，确保 CORS 头完整并设置正确的下载文件名
 
     const response = await fetch(new Request(pubUrl, {
       method: "GET",
