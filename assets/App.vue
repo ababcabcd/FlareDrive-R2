@@ -462,6 +462,7 @@ export default {
     _prefetchCtrl: null,
     _prefetchFileSize: 0,
     _prefetchEndByte: 0,
+    _prefetchCurrentByte: 0,
     _prefetchActive: false,
     _prefetchBatchRunning: false,
     _prefetchMetadataHandled: false,
@@ -1625,6 +1626,7 @@ export default {
       this._prefetchActive = true;
       this._prefetchUrl = videoUrl;
       this._prefetchEndByte = 0;
+      this._prefetchCurrentByte = 0;
       this._prefetchMetadataHandled = false;
       this._prefetchCtrl = new AbortController();
 
@@ -1693,16 +1695,21 @@ export default {
       const CHUNK_SIZE = 2 * 1024 * 1024;
       const BATCH_SIZE = 3;
       const PARALLEL = 1;
+      const MAX_PREFETCH_AHEAD = 10 * 1024 * 1024; // 最多预取当前位置后 10MB，避免无限下载
       const ctrl = this._prefetchCtrl; // 捕获当前 controller，seek 替换后检测退出
       const url = this._prefetchUrl;
       const fileSize = this._prefetchFileSize;
       let byte = fromByte;
 
-      while (byte < fileSize && this._prefetchActive && this._prefetchCtrl === ctrl) {
+      while (this._prefetchActive && this._prefetchCtrl === ctrl) {
+        // 动态上限：当前播放位置 + MAX_PREFETCH_AHEAD，但不超过文件末尾
+        const cap = Math.min(fileSize, (this._prefetchCurrentByte || 0) + MAX_PREFETCH_AHEAD);
+        if (byte >= cap) break;
+
         const toFetch = [];
         let end = byte, count = 0;
-        while (count < BATCH_SIZE && end < fileSize) {
-          const chunkEnd = Math.min(end + CHUNK_SIZE - 1, fileSize - 1);
+        while (count < BATCH_SIZE && end < cap) {
+          const chunkEnd = Math.min(end + CHUNK_SIZE - 1, cap - 1);
           toFetch.push({ start: end, end: chunkEnd });
           count++; end = chunkEnd + 1;
         }
@@ -1710,7 +1717,7 @@ export default {
 
         // 乐观更新：批次开始就标记预期结束位置，避免 timeupdate 重复触发
         this._prefetchEndByte = end;
-        console.log(`[Prefetch] batch bytes ${toFetch[0].start}-${toFetch[toFetch.length - 1].end}`);
+        console.log(`[Prefetch] batch bytes ${toFetch[0].start}-${toFetch[toFetch.length - 1].end} (cap: ${(cap / 1024 / 1024).toFixed(0)}MB)`);
         const results = [];
         for (let i = 0; i < toFetch.length; i += PARALLEL) {
           if (!this._prefetchActive || this._prefetchCtrl !== ctrl) return;
@@ -1738,8 +1745,13 @@ export default {
     _onVideoTimeUpdate(e) {
       if (!this._prefetchActive || this._prefetchBatchRunning || this._prefetchSeekTimer) return;
       const currentByte = this._estimateCurrentByte(e.target);
+      this._prefetchCurrentByte = currentByte;
+      const MAX_PREFETCH_AHEAD = 10 * 1024 * 1024;
+      const cap = Math.min(this._prefetchFileSize, currentByte + MAX_PREFETCH_AHEAD);
       const margin = 15 * 1024 * 1024;
-      if (currentByte + margin >= this._prefetchEndByte && this._prefetchEndByte < this._prefetchFileSize) {
+      // 已预取到上限或文件末尾，无需继续
+      if (this._prefetchEndByte >= cap) return;
+      if (currentByte + margin >= this._prefetchEndByte) {
         console.log('[Prefetch] timeupdate trigger from byte', currentByte);
         this._prefetchBatch(this._prefetchEndByte);
       }
