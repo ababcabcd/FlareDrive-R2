@@ -41,7 +41,7 @@ function buildCorsHeaders(): Headers {
 // RFC 5987 编码 Content-Disposition 文件名，支持中文/特殊字符
 function encodeContentDisposition(fileName: string): string {
   const encoded = encodeURIComponent(fileName);
-  return `inline; filename="${fileName}"; filename*=UTF-8''${encoded}`;
+  return `attachment; filename="${fileName}"; filename*=UTF-8''${encoded}`;
 }
 
 // 解析单区间 Range 头：bytes=start-end
