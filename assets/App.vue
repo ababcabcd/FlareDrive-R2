@@ -1105,9 +1105,18 @@ export default {
         this.playerType = type;
         this.videoRetryCount = 0;
         this.showPlayer = true;
-        // 预热浏览器缓存：raw 端点已改为 cacheable，预取 chunk 会被 <video> 的 Range 请求命中
+        // 预热浏览器缓存：等视频开始播放后再启动预取，避免与 <video> 的初始 Range 请求争抢带宽
         if (this.playerType === 'video' && this.playerSrc.startsWith('/raw/')) {
-          this.$nextTick(() => this._startVideoPrefetch());
+          this.$nextTick(() => {
+            const video = this.$refs.videoPlayer;
+            if (video) {
+              if (!video.paused) {
+                this._startVideoPrefetch();
+              } else {
+                video.addEventListener('playing', () => this._startVideoPrefetch(), { once: true });
+              }
+            }
+          });
         }
       } else {
         window.open(filePath);
@@ -1609,7 +1618,7 @@ export default {
 
     // ==================== 视频多线程预取 ====================
 
-    /** 启动预取：先 HEAD 取文件大小，但等 loadedmetadata 后才开始下载 */
+    /** 启动预取：先 HEAD 取文件大小，等 loadedmetadata 后开始下载（调用方已等 playing 事件） */
     async _startVideoPrefetch() {
       if (this._prefetchActive) return;
       const videoUrl = this.playerSrc;
