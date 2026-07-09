@@ -179,6 +179,7 @@ export async function onRequestGet(context: any) {
     // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
     // 导致 Worker 无法识别媒体请求。这里改为同时检测文件扩展名，视频/音频
     // 文件无论 Sec-Fetch-Dest 如何都会做 Range 夹紧，防止 Workers 代理全文件导致超时。
+    const fileName = metadata.key.split('/').pop() || '';
     const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
     const fileExt = (fileName.split('.').pop() || '').toLowerCase();
     const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio' || mediaExtensions.includes(fileExt);
@@ -227,7 +228,6 @@ export async function onRequestGet(context: any) {
     }
 
     // 如果 R2/CDN 返回的 Content-Type 是 octet-stream 或缺失，按扩展名兜底修正
-    const fileName = metadata.key.split('/').pop() || '';
     const resolvedType = resolveContentType(fileName, headers.get('Content-Type') || headObj.httpMetadata?.contentType);
     if (resolvedType) {
       headers.set('Content-Type', resolvedType);
