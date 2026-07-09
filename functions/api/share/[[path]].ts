@@ -112,7 +112,7 @@ export async function onRequestGet(context) {
       });
     }
 
-    const obj = await bucket.get(metadata.key);
+    const obj = await bucket.head(metadata.key);
     if (!obj) {
       return new Response(JSON.stringify({ valid: false, message: "文件不存在" }), {
         headers: { "Content-Type": "application/json" },
