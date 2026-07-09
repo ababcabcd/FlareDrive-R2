@@ -42,7 +42,11 @@
       @drop.prevent="onDrop"
       :style="{ backgroundImage: `url('${backgroundImageUrl}')` }"
   >
-    <progress v-if="uploadProgress !== null" :value="uploadProgress" max="100"></progress>
+    <div v-if="uploadProgress !== null" class="upload-progress-bar">
+      <span class="upload-progress-label">{{ uploadProgressLabel || '上传中' }} <em>{{ Math.round(uploadProgress) }}%</em></span>
+      <progress :value="uploadProgress" max="100"></progress>
+      <button class="upload-cancel-btn" title="取消上传" @click="cancelUpload">✕</button>
+    </div>
     <UploadPopup v-model="showUploadPopup" @upload="onUploadClicked" @createFolder="createFolder"></UploadPopup>
     <button class="upload-button circle" @click="showUploadPopup = true">
       <svg t="1741764069699" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
@@ -372,9 +376,12 @@
         <div class="player-body">
           <img v-if="playerSrc && playerType === 'image'" :src="playerSrc" :alt="playerName" class="player-image"
             @error="console.error('图片加载失败', $event.target.error)" />
-          <video v-else-if="playerSrc && playerType === 'video'" :src="playerSrc" controls autoplay
+          <video v-else-if="playerSrc && playerType === 'video'" ref="videoPlayer" :src="playerSrc" controls autoplay
             preload="metadata" playsinline class="player-video"
-            @error="console.error('媒体加载失败', $event.target.error)"></video>
+            @error="onVideoError"
+            @loadedmetadata="_onVideoLoadedMetadata"
+            @timeupdate="_onVideoTimeUpdate"
+            @seeked="_onVideoSeeked"></video>
           <audio v-else-if="playerSrc && playerType === 'audio'" :src="playerSrc" controls autoplay class="player-audio"
             @error="console.error('媒体加载失败', $event.target.error)"></audio>
         </div>
@@ -392,6 +399,7 @@ import {
   multipartUpload,
   SIZE_LIMIT,
 } from "/assets/main.mjs";
+import { optimizeVideo } from "./videoProcess.mjs";
 import Dialog from "./Dialog.vue";
 import Menu from "./Menu.vue";
 import MimeIcon from "./MimeIcon.vue";
@@ -414,6 +422,8 @@ export default {
     showMenu: false,
     showUploadPopup: false,
     uploadProgress: null,
+    uploadProgressLabel: '',
+    uploadAbortCtrl: null,
     uploadQueue: [],
     backgroundImageUrl: "",
     showShareModal: false,
@@ -431,6 +441,16 @@ export default {
     playerSrc: '',
     playerName: '',
     playerType: '',
+    videoRetryCount: 0,
+    // 视频多线程预取
+    _prefetchCtrl: null,
+    _prefetchFileSize: 0,
+    _prefetchEndByte: 0,
+    _prefetchActive: false,
+    _prefetchBatchRunning: false,
+    _prefetchMetadataHandled: false,
+    _prefetchSeekTimer: null,
+    _prefetchUrl: '',
     toastVisible: false,
     toastMessage: '',
     // 自定义登录（必须在 data() 中初始化，因为 watch immediate 在 created 之前执行）
@@ -455,6 +475,59 @@ export default {
       if (e.key === 'Escape' && this.showPlayer) this.showPlayer = false;
     };
     document.addEventListener('keydown', this._keyHandler);
+
+    // 注册 Service Worker 用于视频/音频多线程预取加速
+    this._swReadyPromise = Promise.resolve(false);
+    if ('serviceWorker' in navigator) {
+      this._swReadyPromise = new Promise((resolve) => {
+        let resolved = false;
+        const done = (ok) => { if (!resolved) { resolved = true; resolve(ok); } };
+
+        navigator.serviceWorker
+          .register('/sw.mjs', { scope: '/', updateViaCache: 'none' })
+          .then(reg => {
+            console.log('[App] SW 注册成功', reg.scope);
+            // 立即检查更新，确保加载最新 sw.mjs
+            reg.update().catch(() => {});
+
+            const pingSw = () => {
+              if (!navigator.serviceWorker.controller) return;
+              const channel = new MessageChannel();
+              channel.port1.onmessage = (e) => {
+                console.log('[App] SW ping 响应:', e.data);
+              };
+              navigator.serviceWorker.controller.postMessage('ping', [channel.port2]);
+            };
+
+            // 如果已经激活直接放行
+            if (navigator.serviceWorker.controller) {
+              console.log('[App] SW 已控制页面');
+              pingSw();
+              done(true);
+              return;
+            }
+            // 等 activate + claim
+            const onState = () => {
+              if (navigator.serviceWorker.controller) {
+                console.log('[App] SW 已激活并控制页面');
+                pingSw();
+                done(true);
+              }
+            };
+            if (reg.installing) reg.installing.addEventListener('statechange', onState);
+            if (reg.waiting) onState();
+            reg.addEventListener('updatefound', () => {
+              if (reg.installing) reg.installing.addEventListener('statechange', onState);
+            });
+            // 最多等 2s，超时也继续
+            setTimeout(() => done(false), 2000);
+          })
+          .catch(err => {
+            console.warn('[App] SW 注册失败:', err.message);
+            done(false);
+          });
+      });
+    }
   },
 
   beforeUnmount() {
@@ -822,17 +895,70 @@ export default {
       fileElement.value = null;
     },
 
-    preview(filePath, contentType) {
-      // 图片/视频/音频在当前窗口用内建查看器打开
-      if (contentType && /^(image\/|video\/|audio\/|application\/ogg)/.test(contentType)) {
+    async preview(filePath, contentType) {
+      const name = filePath.split('/').pop();
+      const type = this._mediaType(contentType, name);
+      if (type) {
+        // 图片/视频/音频在当前窗口用内建查看器打开
         this.playerSrc = filePath;
-        this.playerName = filePath.split('/').pop();
-        if (contentType.startsWith('image/')) this.playerType = 'image';
-        else if (contentType.startsWith('audio/')) this.playerType = 'audio';
-        else this.playerType = 'video';
+        this.playerName = name;
+        this.playerType = type;
+        this.videoRetryCount = 0;
         this.showPlayer = true;
+        // 预热浏览器缓存：raw 端点已改为 cacheable，预取 chunk 会被 <video> 的 Range 请求命中
+        if (this.playerType === 'video' && this.playerSrc.startsWith('/raw/')) {
+          this.$nextTick(() => this._startVideoPrefetch());
+        }
       } else {
         window.open(filePath);
+      }
+    },
+
+    // 根据 Content-Type 与扩展名判定媒体类型，确保 R2 存为 octet-stream 的旧文件也能在当前页预览
+    _mediaType(contentType, name) {
+      if (contentType && /^(image\/|video\/|audio\/|application\/ogg)/.test(contentType)) {
+        if (contentType.startsWith('image/')) return 'image';
+        if (contentType.startsWith('audio/')) return 'audio';
+        return 'video';
+      }
+      // 兜底：按扩展名判断（Content-Type 缺失/错误时）
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      const VIDEO = ['mp4', 'm4v', 'mov', 'webm', 'ogv', 'ogg'];
+      const AUDIO = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'oga'];
+      const IMAGE = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'];
+      if (VIDEO.includes(ext)) return 'video';
+      if (AUDIO.includes(ext)) return 'audio';
+      if (IMAGE.includes(ext)) return 'image';
+      return null;
+    },
+
+    async onVideoError(event) {
+      const video = event.target;
+      const currentSrc = video.currentSrc || video.src;
+      console.error('[App] 视频播放失败', currentSrc, video.error);
+
+      // 只兜底一次，避免循环
+      if (this.videoRetryCount > 0) return;
+      this.videoRetryCount++;
+
+      // 如果当前已经是最终 CDN 直链（非 /raw/），不再 fallback
+      if (!currentSrc.startsWith('/raw/') && !currentSrc.startsWith(window.location.origin)) {
+        console.log('[App] 已是直链，不再 fallback');
+        return;
+      }
+
+      // 播放失败时尝试 fallback 到 CDN 直链
+      try {
+        const res = await fetch(currentSrc, { method: 'HEAD', redirect: 'follow' });
+        const directUrl = res.url;
+        if (directUrl && directUrl !== currentSrc) {
+          console.log('[App] fallback 到直链', directUrl);
+          video.src = directUrl;
+          video.load();
+          video.play().catch(() => {});
+        }
+      } catch (e) {
+        console.error('[App] fallback 直链失败', e);
       }
     },
 
@@ -846,16 +972,50 @@ export default {
       if (!this.uploadQueue.length) {
         this.fetchFiles();
         this.uploadProgress = null;
+        this.uploadProgressLabel = '';
         return;
       }
 
       /** @type File **/
       const { basedir, file } = this.uploadQueue.pop(0);
+      let uploadFile = file;
       let thumbnailDigest = null;
 
-      if (file.type.startsWith("image/") || file.type === "video/mp4") {
+      // 为本次上传创建中止控制器，供取消按钮中断在途请求
+      this.uploadAbortCtrl = new AbortController();
+      const signal = this.uploadAbortCtrl.signal;
+
+      // —— ffmpeg 视频优化（faststart） ——
+      if (file.type?.startsWith('video/')) {
+        const FFMPEG_MAX = 500 * 1024 * 1024;
+        if (file.size > FFMPEG_MAX) {
+          this.showToast(`${file.name} 超过 500MB，跳过 ffmpeg 优化（建议本地执行）`);
+        } else {
+          this.showToast(`正在优化视频：${file.name}`);
+          this.uploadProgressLabel = `优化 ${file.name} ...`;
+          this.uploadProgress = 0;
+          try {
+            const result = await optimizeVideo(file, (pct) => {
+              this.uploadProgress = Math.round(pct * 100);
+            }, signal);
+            if (signal.aborted) return; // 优化期间被取消
+            if (result.optimized) {
+              uploadFile = result.file;
+              this.showToast(`视频优化完成，开始上传`);
+              console.log(`[App] ffmpeg faststart 完成: ${(file.size/1024/1024).toFixed(0)}MB -> ${(uploadFile.size/1024/1024).toFixed(0)}MB`);
+            }
+          } catch (e) {
+            if (signal.aborted) return; // 取消导致的 abort 不算失败
+            throw e;
+          }
+        }
+      }
+
+      // —— 缩略图（仅图片，视频缩略图本项目不展示） ——
+      if (uploadFile.type.startsWith("image/")) {
         try {
-          const thumbnailBlob = await generateThumbnail(file);
+          this.uploadProgressLabel = '生成缩略图 ...';
+          const thumbnailBlob = await generateThumbnail(uploadFile);
           const digestHex = await blobDigest(thumbnailBlob);
 
           const thumbnailUploadUrl = `/api/write/items/_$flaredrive$/thumbnails/${digestHex}.png`;
@@ -875,32 +1035,67 @@ export default {
         }
       }
 
+      // 模拟进度兜底：Safari / localhost 下 XHR 往往只触发一次 100% 进度事件，
+      // 这里平滑推进到 95%，真实进度事件触发时会被覆盖。
+      // 声明在 try 外，确保 catch / 取消分支都能 clearInterval。
+      let simulateTimer = null;
       try {
-        const uploadUrl = `/api/write/items/${basedir}${file.name}`;
+        this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
+        this.uploadProgress = 0;
+        const uploadUrl = `/api/write/items/${basedir}${uploadFile.name}`;
         const headers = {};
+
+        simulateTimer = setInterval(() => {
+          const next = Math.min(this.uploadProgress + 4, 95);
+          if (next > this.uploadProgress) this.uploadProgress = next;
+        }, 150);
+
         const onUploadProgress = (progressEvent) => {
-          var percentCompleted =
-            (progressEvent.loaded * 100) / progressEvent.total;
-          this.uploadProgress = percentCompleted;
+          if (progressEvent.total) {
+            const pct = (progressEvent.loaded * 100) / progressEvent.total;
+            const capped = Math.min(pct, 98);
+            // 只在真实进度大于当前显示值时更新，避免被回退
+            if (capped > this.uploadProgress) {
+              this.uploadProgress = capped;
+              this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
+            }
+          }
         };
         if (thumbnailDigest) headers["fd-thumbnail"] = thumbnailDigest;
-        if (file.size >= SIZE_LIMIT) {
-          await multipartUpload(`${basedir}${file.name}`, file, {
+        if (uploadFile.size >= SIZE_LIMIT) {
+          await multipartUpload(`${basedir}${uploadFile.name}`, uploadFile, {
             headers,
             onUploadProgress,
+            signal,
           });
         } else {
-          await axios.put(uploadUrl, file, { headers, onUploadProgress });
+          await axios.put(uploadUrl, uploadFile, { headers, onUploadProgress, signal });
         }
+        clearInterval(simulateTimer);
+        this.uploadProgressLabel = `上传完成: ${uploadFile.name}`;
+        this.uploadProgress = 100;
+        await new Promise(r => setTimeout(r, 300));
       } catch (error) {
-        this.apiFetch("/api/write/")
-          .then((value) => {
-            if (value.redirected) window.location.href = value.url;
-          })
-          .catch(() => { });
-        console.log(`Upload ${file.name} failed`, error);
+        clearInterval(simulateTimer);
+        // 取消导致的 abort 不视为上传失败，跳过鉴权重定向检查
+        if (!signal.aborted) {
+          this.apiFetch("/api/write/")
+            .then((value) => {
+              if (value.redirected) window.location.href = value.url;
+            })
+            .catch(() => { });
+          console.log(`Upload ${uploadFile.name} failed`, error);
+        }
       }
       setTimeout(this.processUploadQueue);
+    },
+
+    cancelUpload() {
+      if (this.uploadAbortCtrl) this.uploadAbortCtrl.abort();
+      this.uploadAbortCtrl = null;
+      this.uploadQueue = []; // 清空队列，不再处理后续文件
+      this.uploadProgress = null;
+      this.uploadProgressLabel = '已取消上传';
     },
 
     async removeFile(key) {
@@ -1191,9 +1386,169 @@ export default {
       this.uploadQueue.push(...uploadTasks);
       setTimeout(() => this.processUploadQueue());
     },
+
+    // ==================== 视频多线程预取 ====================
+
+    /** 启动预取：先 HEAD 取文件大小，但等 loadedmetadata 后才开始下载 */
+    async _startVideoPrefetch() {
+      if (this._prefetchActive) return;
+      const videoUrl = this.playerSrc;
+      if (!videoUrl.startsWith('/raw/')) return;
+
+      this._prefetchActive = true;
+      this._prefetchUrl = videoUrl;
+      this._prefetchEndByte = 0;
+      this._prefetchMetadataHandled = false;
+      this._prefetchCtrl = new AbortController();
+
+      try {
+        const headRes = await fetch(videoUrl, {
+          method: 'HEAD',
+          signal: this._prefetchCtrl.signal,
+          headers: this._prefetchAuthHeaders(),
+        });
+        this._prefetchFileSize = parseInt(headRes.headers.get('Content-Length'), 10) || 0;
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        this._stopVideoPrefetch();
+        return;
+      }
+
+      if (this._prefetchFileSize <= 0) { this._stopVideoPrefetch(); return; }
+
+      console.log('[Prefetch] ready, size=', (this._prefetchFileSize / 1024 / 1024).toFixed(1) + 'MB');
+
+      const video = this.$refs.videoPlayer;
+      if (video && video.readyState >= 1) {
+        this._onVideoLoadedMetadata({ target: video });
+      }
+    },
+
+    async _onVideoLoadedMetadata(e) {
+      if (!this._prefetchActive || this._prefetchFileSize <= 0 || this._prefetchMetadataHandled) return;
+      this._prefetchMetadataHandled = true;
+      const video = e.target;
+
+      // 从当前播放位置之后开始，跳过头一个 chunk，避免和播放器抢首包
+      const currentByte = this._estimateCurrentByte(video);
+      const CHUNK_SIZE = 2 * 1024 * 1024;
+      const startByte = Math.min(this._prefetchFileSize, Math.max(0, currentByte + CHUNK_SIZE));
+      console.log('[Prefetch] loadedmetadata, start from byte', startByte);
+      this._prefetchBatch(startByte);
+    },
+
+    _stopVideoPrefetch() {
+      if (!this._prefetchActive) return;
+      this._prefetchActive = false;
+      this._prefetchBatchRunning = false;
+      this._prefetchMetadataHandled = false;
+      if (this._prefetchSeekTimer) { clearTimeout(this._prefetchSeekTimer); this._prefetchSeekTimer = null; }
+      if (this._prefetchCtrl) { this._prefetchCtrl.abort(); this._prefetchCtrl = null; }
+      console.log('[Prefetch] stopped');
+    },
+
+    _prefetchAuthHeaders() {
+      const h = {};
+      const token = sessionStorage.getItem('flare_auth');
+      if (token) h['X-Flare-Auth'] = token;
+      return h;
+    },
+
+    _estimateCurrentByte(videoEl) {
+      const dur = videoEl.duration;
+      if (!dur || !isFinite(dur) || !this._prefetchFileSize) return 0;
+      return Math.floor((videoEl.currentTime / dur) * this._prefetchFileSize);
+    },
+
+    async _prefetchBatch(fromByte) {
+      if (this._prefetchBatchRunning) return;
+      this._prefetchBatchRunning = true;
+      const CHUNK_SIZE = 2 * 1024 * 1024;
+      const BATCH_SIZE = 3;
+      const PARALLEL = 1;
+      const ctrl = this._prefetchCtrl; // 捕获当前 controller，seek 替换后检测退出
+      const url = this._prefetchUrl;
+      const fileSize = this._prefetchFileSize;
+      let byte = fromByte;
+
+      while (byte < fileSize && this._prefetchActive && this._prefetchCtrl === ctrl) {
+        const toFetch = [];
+        let end = byte, count = 0;
+        while (count < BATCH_SIZE && end < fileSize) {
+          const chunkEnd = Math.min(end + CHUNK_SIZE - 1, fileSize - 1);
+          toFetch.push({ start: end, end: chunkEnd });
+          count++; end = chunkEnd + 1;
+        }
+        if (toFetch.length === 0) break;
+
+        // 乐观更新：批次开始就标记预期结束位置，避免 timeupdate 重复触发
+        this._prefetchEndByte = end;
+        console.log(`[Prefetch] batch bytes ${toFetch[0].start}-${toFetch[toFetch.length - 1].end}`);
+        const results = [];
+        for (let i = 0; i < toFetch.length; i += PARALLEL) {
+          if (!this._prefetchActive || this._prefetchCtrl !== ctrl) return;
+          const slice = toFetch.slice(i, i + PARALLEL);
+          const batchResults = await Promise.allSettled(
+            slice.map(({ start, end }) =>
+              fetch(url, {
+                headers: { ...this._prefetchAuthHeaders(), Range: `bytes=${start}-${end}` },
+                signal: ctrl.signal,
+              }).then(r => { if (r.ok) return r.arrayBuffer(); throw new Error(`${r.status}`); })
+            )
+          );
+          if (this._prefetchCtrl !== ctrl) return; // controller 被替换，退出
+          results.push(...batchResults);
+        }
+
+        const ok = results.filter(r => r.status === 'fulfilled').length;
+        const totalBytes = toFetch.reduce((s, c) => s + (c.end - c.start + 1), 0);
+        console.log(`[Prefetch] done: ${ok}/${toFetch.length} chunks, ${(totalBytes / 1024 / 1024).toFixed(1)}MB`);
+        byte = end;
+      }
+      this._prefetchBatchRunning = false;
+    },
+
+    _onVideoTimeUpdate(e) {
+      if (!this._prefetchActive || this._prefetchBatchRunning || this._prefetchSeekTimer) return;
+      const currentByte = this._estimateCurrentByte(e.target);
+      const margin = 15 * 1024 * 1024;
+      if (currentByte + margin >= this._prefetchEndByte && this._prefetchEndByte < this._prefetchFileSize) {
+        console.log('[Prefetch] timeupdate trigger from byte', currentByte);
+        this._prefetchBatch(this._prefetchEndByte);
+      }
+    },
+
+    _onVideoSeeked(e) {
+      if (!this._prefetchActive) return;
+      const video = e.target;
+      if (this._prefetchSeekTimer) clearTimeout(this._prefetchSeekTimer);
+      this._prefetchSeekTimer = setTimeout(() => {
+        this._prefetchSeekTimer = null;
+        if (!this._prefetchActive) return;
+        const currentByte = this._estimateCurrentByte(video);
+        const CHUNK_SIZE = 2 * 1024 * 1024;
+        const windowStart = Math.max(0, this._prefetchEndByte - 10 * 1024 * 1024);
+        const windowEnd = this._prefetchEndByte + CHUNK_SIZE;
+        // 如果目标已经在当前预取窗口内，不用重启
+        if (currentByte >= windowStart && currentByte <= windowEnd) return;
+
+        console.log('[Prefetch] seek to byte', currentByte, 'restart');
+        // 跳过当前播放位置后一个 chunk，避免和播放器刚 seek 完要拿的数据抢
+        const startByte = Math.min(this._prefetchFileSize, currentByte + CHUNK_SIZE);
+        // 先取消正在跑的批次，让 _prefetchBatchRunning 归位
+        if (this._prefetchCtrl) this._prefetchCtrl.abort();
+        this._prefetchCtrl = new AbortController();
+        this._prefetchBatchRunning = false;
+        this._prefetchEndByte = startByte;
+        this._prefetchBatch(startByte);
+      }, 300);
+    },
   },
 
   watch: {
+    showPlayer(val) {
+      if (!val) this._stopVideoPrefetch();
+    },
     cwd: {
       handler() {
         if (this.showLogin) return;

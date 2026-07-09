@@ -225,6 +225,78 @@ export async function onRequestGet(context) {
     function isVideo(type) { return type && /^video\\//.test(type); }
     function isAudio(type) { return type && /^audio\\//.test(type); }
     function isMedia(type) { return isImage(type) || isVideo(type) || isAudio(type); }
+
+    // ===== 视频多线程预取（同源 fileUrl，兼容 Safari CORS 限制）=====
+    var _pf = { active: false, running: false, ctrl: null, size: 0, endByte: 0 };
+
+    function _pfByte(vid) {
+      var d = vid.duration;
+      if (!d || !isFinite(d) || !_pf.size) return 0;
+      return Math.floor((vid.currentTime / d) * _pf.size);
+    }
+
+    async function _pfGo(from) {
+      if (_pf.running) return;
+      _pf.running = true;
+      var CH = 2 * 1024 * 1024, BA = 3, PA = 1;
+      var b = from;
+      while (b < _pf.size && _pf.active) {
+        var fs = [], e = b, n = 0;
+        while (n < BA && e < _pf.size) { var ce = Math.min(e + CH - 1, _pf.size - 1); fs.push({ s: e, e: ce }); n++; e = ce + 1; }
+        _pf.endByte = e;
+        console.log('[Prefetch] batch bytes', fs[0].s + '-' + fs[fs.length - 1].e);
+        for (var i = 0; i < fs.length; i += PA) {
+          if (!_pf.active) return;
+          var sl = fs.slice(i, i + PA);
+          // 直接请求同源 fileUrl，不经过 CDN 跨域（Safari CORS 兼容）
+          await Promise.allSettled(sl.map(function(ch) {
+            return fetch(fileUrl, { headers: { Range: 'bytes=' + ch.s + '-' + ch.e }, signal: _pf.ctrl.signal })
+              .then(function(r) { if (r.ok) return r.arrayBuffer(); throw new Error(String(r.status)); });
+          }));
+        }
+        b = e;
+      }
+      _pf.running = false;
+    }
+
+    function _pfOnTime(e) {
+      if (!_pf.active || _pf.running) return;
+      var b = _pfByte(e.target), m = 15 * 1024 * 1024;
+      if (b + m >= _pf.endByte && _pf.endByte < _pf.size) _pfGo(_pf.endByte);
+    }
+
+    function _pfOnSeek(e) {
+      if (!_pf.active) return;
+      var b = _pfByte(e.target);
+      if (b > _pf.endByte || b < _pf.endByte - 10 * 1024 * 1024) {
+        if (_pf.ctrl) _pf.ctrl.abort();
+        _pf.ctrl = new AbortController();
+        _pf.running = false;
+        _pfGo(b);
+      }
+    }
+
+    async function _pfStart(vid) {
+      if (_pf.active) return;
+      _pf.active = true;
+      _pf.ctrl = new AbortController();
+      // HEAD 获取文件大小（兼容 Safari，不会触发 body.cancel() 报错）
+      try {
+        var hr = await fetch(fileUrl, { method: 'HEAD', signal: _pf.ctrl.signal });
+        _pf.size = parseInt(hr.headers.get('Content-Length'), 10) || 0;
+      } catch(e) { if (e.name !== 'AbortError') { _pfStop(); } return; }
+      if (_pf.size <= 0) { _pfStop(); return; }
+      console.log('[Prefetch] start, size=', (_pf.size / 1024 / 1024).toFixed(1) + 'MB');
+      vid.addEventListener('timeupdate', _pfOnTime);
+      vid.addEventListener('seeked', _pfOnSeek);
+      _pfGo(0);
+    }
+
+    function _pfStop() {
+      _pf.active = false; _pf.running = false;
+      if (_pf.ctrl) { _pf.ctrl.abort(); _pf.ctrl = null; }
+    }
+    // ===== 预取结束 =====
     
     function getIcon(type) {
       if (isImage(type)) return '🖼️';
@@ -271,6 +343,10 @@ export async function onRequestGet(context) {
             '<button class="download-btn" onclick="downloadFile()">' +
               '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
             '</button>';
+          // 视频启动多线程预取
+          if (isVideo(data.contentType)) {
+            setTimeout(function() { var v = app.querySelector('video'); if (v) _pfStart(v); }, 50);
+          }
         } else {
           app.innerHTML = 
             '<div class="icon success-icon">📁</div>' +

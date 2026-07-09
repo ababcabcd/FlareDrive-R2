@@ -156,10 +156,55 @@ input[type="search"] {
   margin-left: 8px;
 }
 
-progress {
+.upload-progress-bar {
   position: fixed;
   bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  background: rgba(0,0,0,0.75);
+  padding: 6px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upload-progress-label {
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 28px; /* 给右侧取消按钮留位 */
+}
+
+.upload-cancel-btn {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.upload-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.upload-progress-bar progress,
+progress {
+  position: static;
   width: 100%;
+  height: 6px;
+  border-radius: 3px;
 }
 
 button.circle {

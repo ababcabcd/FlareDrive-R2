@@ -11,25 +11,51 @@ export async function generateThumbnail(file) {
 
   /** @type HTMLImageElement */
   if (file.type.startsWith("image/")) {
+    let blobUrl = null;
     const image = await new Promise((resolve) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.src = URL.createObjectURL(file);
+      blobUrl = URL.createObjectURL(file);
+      image.src = blobUrl;
     });
     ctx.drawImage(image, 0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+    URL.revokeObjectURL(blobUrl);
   } else if (file.type === "video/mp4") {
-    // Generate thumbnail from video
-    const video = await new Promise(async (resolve, reject) => {
-      const video = document.createElement("video");
-      video.muted = true;
-      video.src = URL.createObjectURL(file);
-      setTimeout(() => reject(new Error("Video load timeout")), 2000);
-      await video.play();
-      await video.pause();
-      video.currentTime = 0;
-      resolve(video);
-    });
-    ctx.drawImage(video, 0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+    // Generate thumbnail from video（无需播放，loadeddata 即可取帧）
+    let blobUrl = null;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+
+    const cleanup = () => {
+      video.removeAttribute("src"); // 先断开，避免 Safari 后台继续加载
+      video.load();
+      if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+    };
+
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error("Video load timeout"));
+        }, 5000);
+        video.onloadeddata = () => {
+          clearTimeout(timer);
+          video.currentTime = 1;
+          video.onseeked = () => resolve(video);
+        };
+        video.onerror = () => {
+          clearTimeout(timer);
+          cleanup();
+          reject(new Error("Video load error"));
+        };
+        blobUrl = URL.createObjectURL(file);
+        video.src = blobUrl;
+      });
+      ctx.drawImage(video, 0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+    } finally {
+      cleanup();
+    }
   }
 
   /** @type Blob */
@@ -62,9 +88,10 @@ export const SIZE_LIMIT = 100 * 1000 * 1000; // 100MB
 export async function multipartUpload(key, file, options) {
   const headers = options?.headers || {};
   headers["content-type"] = file.type;
+  const signal = options?.signal;
 
   const uploadId = await axios
-    .post(`/api/write/items/${key}?uploads`, "", { headers })
+    .post(`/api/write/items/${key}?uploads`, "", { headers, signal })
     .then((res) => res.data.uploadId);
   const totalChunks = Math.ceil(file.size / SIZE_LIMIT);
 
@@ -74,6 +101,7 @@ export async function multipartUpload(key, file, options) {
       const searchParams = new URLSearchParams({ partNumber: i, uploadId });
       yield axios
         .put(`/api/write/items/${key}?${searchParams}`, chunk, {
+          signal,
           onUploadProgress(progressEvent) {
             if (typeof options?.onUploadProgress !== "function") return;
             options.onUploadProgress({
@@ -97,5 +125,5 @@ export async function multipartUpload(key, file, options) {
   const completeParams = new URLSearchParams({ uploadId });
   await axios.post(`/api/write/items/${key}?${completeParams}`, {
     parts: uploadedParts,
-  });
+  }, { signal });
 }

@@ -124,7 +124,12 @@ export async function onRequestPut(context) {
   if (request.headers.has("fd-thumbnail"))
     customMetadata.thumbnail = request.headers.get("fd-thumbnail");
 
-  const obj = await bucket.put(path, content, { customMetadata });
+  const obj = await bucket.put(path, content, {
+    httpMetadata: {
+      contentType: request.headers.get("content-type"),
+    },
+    customMetadata,
+  });
   const { key, size, uploaded } = obj;
   return new Response(JSON.stringify({ key, size, uploaded }), {
     headers: { "Content-Type": "application/json" },

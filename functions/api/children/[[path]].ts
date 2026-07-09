@@ -1,6 +1,18 @@
 import { notFound, parseBucketPath } from "@/utils/bucket";
 import { can_access_path, get_allow_list } from "@/utils/auth";
 
+// OPTIONS 预检请求处理
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "X-Flare-Auth, Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+}
+
 export async function onRequestGet(context) {
   try {
     const [bucket, rawPath] = parseBucketPath(context);
@@ -48,7 +60,10 @@ export async function onRequestGet(context) {
     }
 
     return new Response(JSON.stringify({ value: objKeys, folders }), {
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
     });
   } catch (e) {
     return new Response(e.toString(), { status: 500 });
