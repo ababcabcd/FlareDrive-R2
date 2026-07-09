@@ -78,7 +78,7 @@ export async function blobDigest(blob) {
   return digestHex;
 }
 
-export const SIZE_LIMIT = 100 * 1000 * 1000; // 100MB
+export const SIZE_LIMIT = 25 * 1024 * 1024; // 25MB：更细粒度让进度心跳更短更平滑；满足 R2 单 part ≥5MB 约束，并避开 Pages 对超大请求体的限制
 
 /**
  * @param {string} key

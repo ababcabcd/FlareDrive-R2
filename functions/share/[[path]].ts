@@ -220,6 +220,7 @@ export async function onRequestGet(context) {
   <script>
     var token = "${token}";
     var fileUrl = '/api/share/download/?token=' + token;
+    var shareFileName = '';
     
     function isImage(type) { return type && /^image\\//.test(type); }
     function isVideo(type) { return type && /^video\\//.test(type); }
@@ -319,6 +320,7 @@ export async function onRequestGet(context) {
       var app = document.getElementById('app');
       
       if (data.valid) {
+        shareFileName = data.fileName;
         var icon = getIcon(data.contentType);
         var label = getLabel(data.contentType);
         
@@ -370,7 +372,90 @@ export async function onRequestGet(context) {
     }
     
     function downloadFile() {
-      window.location.href = fileUrl;
+      // 优先网页内多线程下载；不支持流式落盘(Firefox/Safari)或小文件时回退原生单线程
+      multiThreadDownload();
+    }
+
+    var _dl = { active: false, ctrl: null, writable: null };
+
+    function showDlProgress(pct, label) {
+      var el = document.getElementById('dlProgress');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'dlProgress';
+        el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(17,17,17,.85);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;z-index:9999;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.3)';
+        document.body.appendChild(el);
+      }
+      el.innerHTML = '<div style="margin-bottom:8px">' + (label || '下载中') + ' <b>' + Math.round(pct) + '%</b></div>' +
+        '<progress value="' + pct + '" max="100" style="width:100%"></progress>';
+      el.style.display = 'block';
+    }
+    function hideDlProgress() { var el = document.getElementById('dlProgress'); if (el) el.style.display = 'none'; }
+
+    // 网页内多线程（分块 Range）下载：HEAD 拿大小，并行拉取多区间，
+    // 通过 File System Access API 流式落盘（大文件不占满内存）；不支持则回退原生下载。
+    // 计数在“真正开始下载”时发一次 HEAD(?dl=1)，取消保存对话框不计。
+    async function multiThreadDownload() {
+      if (_dl.active) return;
+      // 1) HEAD 拿大小（不计）
+      var head;
+      try { head = await fetch(fileUrl, { method: 'HEAD' }); }
+      catch (e) { window.location.href = fileUrl; return; }
+      var total = parseInt(head.headers.get('Content-Length') || '0', 10);
+      var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
+      // 小文件或不支持 File System Access：原生下载（计一次数）
+      if (!total || total < 1024 * 1024 || typeof window.showSaveFilePicker !== 'function') {
+        try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
+        window.location.href = fileUrl;
+        return;
+      }
+      var writable = null;
+      try {
+        var handle = await window.showSaveFilePicker({ suggestedName: shareFileName });
+        writable = await handle.createWritable();
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // 用户取消保存：不计下载数
+        try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
+        window.location.href = fileUrl; return;
+      }
+      // 开始下载：计一次数
+      try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
+      _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
+      showDlProgress(0, '下载 ' + shareFileName + ' ...');
+      var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
+      var chunk = Math.ceil(total / threads);
+      var ranges = [];
+      for (var i = 0; i < threads; i++) {
+        var s = i * chunk, e = Math.min(total - 1, s + chunk - 1);
+        if (s > e) break;
+        ranges.push({ s: s, e: e, index: i });
+      }
+      var received = 0, writeChain = Promise.resolve(), queue = ranges.slice();
+      function worker() {
+        return (async function () {
+          while (queue.length) {
+            var r = queue.shift();
+            var res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
+            var buf = new Uint8Array(await res.arrayBuffer());
+            received += buf.length;
+            var pct = total ? (received / total) * 100 : 0;
+            showDlProgress(pct, '下载 ' + shareFileName + ' ... ' + Math.round(pct) + '%');
+            // 顺序写：每个写操作挂在前一个之后，保证字节顺序；用 IIFE 捕获当前 buf 避免闭包串块
+            (function (b) { writeChain = writeChain.then(function () { return writable.write(b); }); })(buf);
+          }
+        })();
+      }
+      try {
+        await Promise.all(Array.from({ length: threads }, worker));
+        await writeChain;
+        await writable.close();
+        showDlProgress(100, '下载完成: ' + shareFileName);
+        setTimeout(hideDlProgress, 800);
+      } catch (e) {
+        if (_dl.ctrl.signal.aborted) showDlProgress(0, '已取消下载');
+        else { console.error('多线程下载失败', e); try { await writable.close(); } catch (_) {} window.location.href = fileUrl; }
+      } finally { _dl.active = false; }
     }
     
     function formatSize(size) {

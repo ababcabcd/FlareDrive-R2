@@ -83,6 +83,11 @@ export async function onRequestHead(context: any) {
     const { metadata, errorResponse } = await validateAndGetMetadata(bucket, token);
     if (errorResponse) return errorResponse;
 
+    // 仅当显式下载（dl=1）时才计数，避免视频预取/多线程下载的多次 Range 请求重复累加
+    if (url.searchParams.get("dl") === "1") {
+      await incrementDownloadCount(bucket, token, metadata, context);
+    }
+
     // 用 head 获取文件元信息，不下载内容
     const obj = await bucket.head(metadata.key);
     if (!obj) {
@@ -128,9 +133,7 @@ export async function onRequestGet(context: any) {
       return new Response("文件不存在", { status: 404 });
     }
 
-    // 递增下载计数后，302 重定向到 CDN，浏览器直接与 R2 交互
-    await incrementDownloadCount(bucket, token, metadata, context);
-
+    // 下载计数已统一在 HEAD(?dl=1) 中递增，避免多线程/视频预取的多次 Range 请求重复计数
     const pubUrl = new URL(metadata.key, context.env["PUBURL"]).href;
 
     const headers = buildCorsHeaders();

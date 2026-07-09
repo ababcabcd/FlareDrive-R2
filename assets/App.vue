@@ -47,6 +47,11 @@
       <progress :value="uploadProgress" max="100"></progress>
       <button class="upload-cancel-btn" title="取消上传" @click="cancelUpload">✕</button>
     </div>
+    <div v-if="downloadProgress !== null" class="upload-progress-bar">
+      <span class="upload-progress-label">{{ downloadProgressLabel || '下载中' }} <em>{{ Math.round(downloadProgress) }}%</em></span>
+      <progress :value="downloadProgress" max="100"></progress>
+      <button class="upload-cancel-btn" title="取消下载" @click="cancelDownload">✕</button>
+    </div>
     <UploadPopup v-model="showUploadPopup" @upload="onUploadClicked" @createFolder="createFolder"></UploadPopup>
     <button class="upload-button circle" @click="showUploadPopup = true">
       <svg t="1741764069699" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"
@@ -191,7 +196,7 @@
           </div>
         </li>
         <li v-for="file in filteredFiles" :key="file.key">
-          <div @click="preview(rawUrl(file.key), file.httpMetadata.contentType)" @contextmenu.prevent="
+          <div @click="preview(rawUrl(file.key), file.httpMetadata.contentType, file.key.split('/').pop())" @contextmenu.prevent="
             showContextMenu = true;
           focusedItem = file;" class="file-item" style="position: relative;">
             <MimeIcon :content-type="file.httpMetadata.contentType" :thumbnail="file.customMetadata.thumbnail
@@ -264,6 +269,11 @@
           <a :href="rawUrl(focusedItem.key)" target="_blank" download>
             <span>下载</span>
           </a>
+        </li>
+        <li>
+          <button @click="multiThreadDownload(focusedItem.key, focusedItem.key.split('/').pop())">
+            <span>多线程下载</span>
+          </button>
         </li>
         <li>
           <button @click="clipboard = focusedItem.key">
@@ -428,6 +438,9 @@ export default {
     uploadProgressLabel: '',
     uploadAbortCtrl: null,
     uploadQueue: [],
+    downloadProgress: null,
+    downloadProgressLabel: '',
+    downloadAbortCtrl: null,
     backgroundImageUrl: "",
     showShareModal: false,
     shareFileKey: null,
@@ -799,6 +812,161 @@ export default {
       return `/api/children/_fd_?name=${encodeURIComponent(prefix)}`;
     },
 
+    // 网页内多线程（分块 Range）下载：
+    // 1) HEAD 拿文件大小/类型；2) 按大小决定线程数(2-8)；
+    // 3) 优先用 File System Access API 流式落盘（大文件不占满内存），
+    //    不支持时回退为合并 Blob 触发下载；超大文件回退原生单线程下载。
+    async multiThreadDownload(key, displayName) {
+      if (this.downloadProgress !== null) {
+        this.showToast('已有下载任务进行中');
+        return;
+      }
+      const token = sessionStorage.getItem('flare_auth');
+      const authHeaders = token ? { 'X-Flare-Auth': token } : {};
+      const url = this.rawUrl(key);
+
+      // 1) HEAD 获取文件大小与类型
+      let total = 0;
+      let contentType = 'application/octet-stream';
+      try {
+        const head = await this.apiFetch(url, { method: 'HEAD' });
+        total = parseInt(head.headers.get('Content-Length') || '0', 10);
+        contentType = head.headers.get('Content-Type') || contentType;
+      } catch (e) {
+        console.error('HEAD 失败，回退到原生下载', e);
+        window.open(url, '_blank');
+        return;
+      }
+      // 小文件直接原生下载即可
+      if (!total || total < 1024 * 1024) {
+        window.open(url, '_blank');
+        return;
+      }
+
+      // 2) 是否支持 File System Access（流式落盘，避免大文件占满内存）
+      let writable = null;
+      const useFS = typeof window.showSaveFilePicker === 'function';
+      if (useFS) {
+        try {
+          const handle = await window.showSaveFilePicker({ suggestedName: displayName });
+          writable = await handle.createWritable();
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // 用户取消保存
+          writable = null; // 其它错误回退到 Blob
+        }
+      }
+
+      // 大文件且不支持流式落盘：内存风险，回退原生单线程下载
+      const SAFE_LIMIT = 1.5 * 1024 * 1024 * 1024;
+      if (!writable && total > SAFE_LIMIT) {
+        this.showToast('文件过大，浏览器内存受限，已改用原生下载');
+        window.open(url, '_blank');
+        return;
+      }
+
+      // 3) 分块
+      const threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
+      const chunkSize = Math.ceil(total / threads);
+      const ranges = [];
+      for (let i = 0; i < threads; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(total - 1, start + chunkSize - 1);
+        if (start > end) break;
+        ranges.push({ start, end, index: i });
+      }
+
+      // 4) 并行下载（带并发上限），按序写入/合并
+      this.downloadProgress = 0;
+      this.downloadProgressLabel = `下载 ${displayName} ...`;
+      const ctrl = new AbortController();
+      this.downloadAbortCtrl = ctrl;
+      let received = 0;
+      const buffers = writable ? null : new Array(ranges.length);
+      let writeChain = Promise.resolve();
+
+      const updateProgress = () => {
+        const pct = total ? (received / total) * 100 : 0;
+        this.downloadProgress = Math.min(99, pct);
+        this.downloadProgressLabel = `下载 ${displayName} ... ${Math.round(pct)}%`;
+      };
+
+      const worker = async (r) => {
+        const res = await this.apiFetch(url, {
+          method: 'GET',
+          headers: { ...authHeaders, Range: `bytes=${r.start}-${r.end}` },
+          signal: ctrl.signal,
+        });
+        if (res.status !== 206 && res.status !== 200) {
+          throw new Error(`分块 ${r.index} 返回 ${res.status}`);
+        }
+        const buf = new Uint8Array(await res.arrayBuffer());
+        received += buf.length;
+        updateProgress();
+        if (writable) {
+          // 顺序写：每个写操作挂在前一个之后，保证字节顺序
+          writeChain = writeChain.then(() => writable.write(buf));
+        } else {
+          buffers[r.index] = buf;
+        }
+      };
+
+      // 并发池：控制同时进行的请求数为 threads
+      const pool = async () => {
+        const queue = [...ranges];
+        const runners = Array.from({ length: threads }, async () => {
+          while (queue.length) {
+            const r = queue.shift();
+            await worker(r);
+          }
+        });
+        await Promise.all(runners);
+        if (writable) {
+          await writeChain;
+          await writable.close();
+        }
+      };
+
+      try {
+        await pool();
+        if (writable) {
+          this.downloadProgress = 100;
+          this.downloadProgressLabel = `下载完成: ${displayName}`;
+          await new Promise((res) => setTimeout(res, 400));
+        } else {
+          const blob = new Blob(buffers, { type: contentType });
+          const objUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = objUrl;
+          a.download = displayName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+          this.downloadProgress = 100;
+          this.downloadProgressLabel = `下载完成: ${displayName}`;
+        }
+      } catch (e) {
+        if (ctrl.signal.aborted) {
+          this.downloadProgressLabel = '已取消下载';
+        } else {
+          console.error('多线程下载失败', e);
+          this.showToast('多线程下载失败，已回退到原生下载');
+          window.open(url, '_blank');
+        }
+        if (writable) { try { await writable.close(); } catch (_) {} }
+      } finally {
+        this.downloadAbortCtrl = null;
+        setTimeout(() => { this.downloadProgress = null; }, 600);
+      }
+    },
+
+    cancelDownload() {
+      if (this.downloadAbortCtrl) this.downloadAbortCtrl.abort();
+      this.downloadProgress = null;
+      this.downloadProgressLabel = '已取消下载';
+      this.downloadAbortCtrl = null;
+    },
+
     // 自定义登录：用户输入凭据 → 前端生成 token → 发送到后端验证 → 成功则存入 sessionStorage
     async doLogin() {
       this.loginError = '';
@@ -911,8 +1079,15 @@ export default {
       fileElement.value = null;
     },
 
-    async preview(filePath, contentType) {
-      const name = filePath.split('/').pop();
+    async preview(filePath, contentType, displayName) {
+      // 显示名优先用调用方传入的真实文件名；否则从 URL 的 name 参数解码还原
+      // （兼容 /raw/_fd_?name=ENCODED 形式，避免标题显示成编码后的 URL）
+      let name = displayName;
+      if (!name) {
+        const u = new URL(filePath, window.location.origin);
+        const n = u.searchParams.get('name');
+        name = n !== null ? decodeURIComponent(n).split('/').pop() : filePath.split('/').pop();
+      }
       const type = this._mediaType(contentType, name);
       if (type) {
         // 图片/视频/音频在当前窗口用内建查看器打开
@@ -1079,11 +1254,12 @@ export default {
         const headers = {};
 
         simulateTimer = setInterval(() => {
-          // 真实进度在流动时（真实网络）不干预，仅当停滞（Safari/localhost）时平滑推进
-          if (Date.now() - lastRealProgressAt > 400 && this.uploadProgress < 95) {
-            this.uploadProgress = Math.min(this.uploadProgress + 4, 95);
+          // 仅在真实进度长时间停滞（>3s，真正卡住/等待服务器确认）时才温和推进 1%，
+          // 避免掩盖正常上传的实时心跳（之前 400ms+4% 会把真停滞伪装成平滑增长）
+          if (Date.now() - lastRealProgressAt > 3000 && this.uploadProgress < 99) {
+            this.uploadProgress = Math.min(this.uploadProgress + 1, 99);
           }
-        }, 150);
+        }, 200);
 
         const onUploadProgress = (progressEvent) => {
           if (progressEvent.total) {
