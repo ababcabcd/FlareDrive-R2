@@ -111,16 +111,28 @@ export async function onRequestHead(context: any) {
   });
 }
 
-// GET 请求 — 直接代理 R2 内容（不 302），避免跨域 CORS 问题
-// 透传 Range 请求到 R2，允许浏览器缓存 Range chunk（private, 1h）
+// GET 请求 — 与 HEAD 不同，浏览器 <video>/<audio>（no-cors 模式，不需要 CORS 头）直接 302 到 CDN
+// 其他请求（JS fetch 预取、图片等）代理 R2 内容，确保 CORS 头完整返回
 export async function onRequestGet(context: any) {
   const authError = checkAuth(context);
   if (authError) return authError;
 
   const url = getPubUrl(context);
+  const request = context.request;
   const [_, path] = parseBucketPath(context);
 
-  const reqHeaders = new Headers(context.request.headers);
+  // 浏览器原生 <video>/<audio> 请求（Sec-Fetch-Dest: video/audio）使用 no-cors 模式，
+  // 且 Safari 对 faststart 视频会发巨量 Range（如 2.9GB），Pages Function 代理会超时/断连。
+  // 走 302 直连 CDN，绕过 Worker 体量限制。
+  const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
+  if (secFetchDest === 'video' || secFetchDest === 'audio') {
+    const redirectHeaders = new Headers(buildCorsHeaders());
+    redirectHeaders.set('Location', url);
+    redirectHeaders.set('Cache-Control', 'no-cache');
+    return new Response(null, { status: 302, headers: redirectHeaders });
+  }
+
+  const reqHeaders = new Headers(request.headers);
   reqHeaders.delete('host');
   reqHeaders.delete('origin');
   reqHeaders.delete('referer');
