@@ -144,11 +144,14 @@ export async function onRequestGet(context: any) {
 
   const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
   const rangeHeader = request.headers.get('Range');
-  // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），这里同时
-  // 检测文件扩展名，确保视频/音频文件无论该头是否存在都会做 Range 夹紧。
+  // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
+  // 这里使用混合检测：Sec-Fetch-Dest 直接为 video/audio → 媒体；否则
+  // 带 Range 且扩展名为视频/音频格式 → 也是媒体（SW 流式转发）。
+  // 不单纯凭扩展名判断，避免下载导航被误当媒体请求。
   const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
   const fileExt = ((path || '').split('.').pop() || '').toLowerCase();
-  const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio' || mediaExtensions.includes(fileExt);
+  const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio'
+    || (rangeHeader && mediaExtensions.includes(fileExt));
   const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB 上限，避免浪费带宽
 
   const reqHeaders = new Headers(request.headers);

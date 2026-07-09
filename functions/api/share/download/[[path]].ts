@@ -177,12 +177,17 @@ export async function onRequestGet(context: any) {
     const rangeHeader = request.headers.get('Range');
 
     // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
-    // 导致 Worker 无法识别媒体请求。这里改为同时检测文件扩展名，视频/音频
-    // 文件无论 Sec-Fetch-Dest 如何都会做 Range 夹紧，防止 Workers 代理全文件导致超时。
+    // 导致 Worker 无法识别媒体请求。这里改为混合检测：
+    // 1. Sec-Fetch-Dest 直接是 video/audio → 一定是媒体请求
+    // 2. 否则，如果请求带了 Range 且文件扩展名是视频/音频格式 → 也是媒体请求
+    //    （SW 转发的流式 Range 请求，Sec-Fetch-Dest 已丢失但保留了 Range）
+    // 注意：不能仅凭扩展名判断，否则下载请求（window.location.href 导航）也会被
+    // 当作媒体处理，导致 Content-Disposition 不设、Range 被错误夹紧、下载变预览。
     const fileName = metadata.key.split('/').pop() || '';
     const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
     const fileExt = (fileName.split('.').pop() || '').toLowerCase();
-    const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio' || mediaExtensions.includes(fileExt);
+    const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio'
+      || (rangeHeader && mediaExtensions.includes(fileExt));
 
     // 浏览器原生 <video>/<audio> 请求全部走 Worker 代理：
     // - 无 Range：请求前 2MB/10MB，返回 206
