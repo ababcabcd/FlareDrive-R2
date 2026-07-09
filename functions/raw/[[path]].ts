@@ -68,7 +68,9 @@ export async function onRequestOptions(context: any) {
 // 构造 PUBURL 的完整 URL（处理中文等特殊字符的编码）
 function getPubUrl(context: any): string {
   const requestUrl = new URL(context.request.url);
-  const filePath = requestUrl.pathname.replace(/^\/raw\//, "");
+  // 优先使用 name query 参数（中文/特殊字符放路径会导致 wrangler 路由 404/405）
+  const nameParam = requestUrl.searchParams.get("name");
+  const filePath = nameParam !== null ? nameParam : requestUrl.pathname.replace(/^\/raw\//, "");
   return new URL(filePath, context.env["PUBURL"]).href;
 }
 

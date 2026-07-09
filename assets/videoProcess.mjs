@@ -59,7 +59,7 @@ function readBox(data, offset) {
 /**
  * 快速检测 moov 是否已在文件头部
  */
-async function isAlreadyFaststart(file) {
+export async function isAlreadyFaststart(file) {
   const CHECK = 1024 * 1024;
   const head = new Uint8Array(
     await file.slice(0, Math.min(file.size, CHECK)).arrayBuffer()
@@ -216,7 +216,7 @@ export async function optimizeVideo(file, onProgress, signal) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   if (!['mp4', 'mov', 'm4v'].includes(ext)) return { file, optimized: false };
 
-  const MAX_MB = 500;
+  const MAX_MB = 1500;
   if (file.size > MAX_MB * 1024 * 1024) {
     console.warn(
       `[VideoProcess] ${(file.size / 1024 / 1024).toFixed(0)}MB > ${MAX_MB}MB，跳过 faststart，建议本地:\n` +

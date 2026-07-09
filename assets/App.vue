@@ -191,7 +191,7 @@
           </div>
         </li>
         <li v-for="file in filteredFiles" :key="file.key">
-          <div @click="preview(`/raw/${file.key}`, file.httpMetadata.contentType)" @contextmenu.prevent="
+          <div @click="preview(rawUrl(file.key), file.httpMetadata.contentType)" @contextmenu.prevent="
             showContextMenu = true;
           focusedItem = file;" class="file-item" style="position: relative;">
             <MimeIcon :content-type="file.httpMetadata.contentType" :thumbnail="file.customMetadata.thumbnail
@@ -261,7 +261,7 @@
           </button>
         </li>
         <li>
-          <a :href="`/raw/${focusedItem.key}`" target="_blank" download>
+          <a :href="rawUrl(focusedItem.key)" target="_blank" download>
             <span>下载</span>
           </a>
         </li>
@@ -276,7 +276,7 @@
           </button>
         </li>
         <li>
-          <button @click="copyLink(`/raw/${focusedItem.key}`)">
+          <button @click="copyLink(rawUrl(focusedItem.key))">
             <span>复制链接</span>
           </button>
         </li>
@@ -388,7 +388,10 @@
       </div>
     </div>
     <Footer />
-    <div v-if="toastVisible" class="toast" v-text="toastMessage"></div>
+    <div v-if="toastVisible" class="toast">
+      <span class="toast-text" v-text="toastMessage"></span>
+      <button v-if="toastAction" class="toast-btn" @click="toastAction.handler()" v-text="toastAction.label"></button>
+    </div>
   </div>
 </template>
 
@@ -399,7 +402,7 @@ import {
   multipartUpload,
   SIZE_LIMIT,
 } from "/assets/main.mjs";
-import { optimizeVideo } from "./videoProcess.mjs";
+import { optimizeVideo, isAlreadyFaststart } from "./videoProcess.mjs";
 import Dialog from "./Dialog.vue";
 import Menu from "./Menu.vue";
 import MimeIcon from "./MimeIcon.vue";
@@ -453,6 +456,7 @@ export default {
     _prefetchUrl: '',
     toastVisible: false,
     toastMessage: '',
+    toastAction: null, // { label: string, handler: () => void } | null
     // 自定义登录（必须在 data() 中初始化，因为 watch immediate 在 created 之前执行）
     showLogin: !sessionStorage.getItem('flare_auth'),
     loginUsername: '',
@@ -679,7 +683,7 @@ export default {
       this.shareLink = null;
 
       try {
-        const response = await axios.post(`/api/share/${this.shareFileKey}`, {
+        const response = await axios.post(`/api/share/_fd_?name=${encodeURIComponent(this.shareFileKey)}`, {
           expiresInMinutes: this.shareExpires,
         });
         this.shareLink = response.data.shareUrl;
@@ -721,13 +725,15 @@ export default {
       this.showToast("已复制到剪贴板");
     },
 
-    showToast(message) {
+    showToast(message, action) {
       this.toastMessage = message;
+      this.toastAction = action || null;
       this.toastVisible = true;
       clearTimeout(this._toastTimer);
       this._toastTimer = setTimeout(() => {
         this.toastVisible = false;
-      }, 2000);
+        this.toastAction = null;
+      }, action ? 8000 : 2000);
     },
 
     async deleteShare(shareId) {
@@ -742,7 +748,7 @@ export default {
     },
 
     async copyPaste(source, target) {
-      const uploadUrl = `/api/write/items/${encodeURIComponent(target)}`;
+      const uploadUrl = `/api/write/items/_fd_?name=${encodeURIComponent(target)}`;
       await axios.put(uploadUrl, "", {
         headers: { "x-amz-copy-source": encodeURIComponent(source) },
       });
@@ -753,7 +759,7 @@ export default {
         const folderName = window.prompt("请输入文件夹名称");
         if (!folderName) return;
         this.showUploadPopup = false;
-        const uploadUrl = `/api/write/items/${this.cwd}${folderName}/_$folder$`;
+        const uploadUrl = `/api/write/items/_fd_?name=${encodeURIComponent(this.cwd + folderName + "/_$folder$")}`;
         await axios.put(uploadUrl, "");
         this.fetchFiles();
       } catch (error) {
@@ -779,6 +785,18 @@ export default {
         credentials: 'omit',
         headers,
       });
+    },
+
+    // 文件名含中文/特殊字符时，放在 URL 路径里会导致 wrangler 路由 404/405，
+    // 因此统一用 /_fd_ 占位段让路由命中，真实 key 走 name query 参数
+    rawUrl(key) {
+      return `/raw/_fd_?name=${encodeURIComponent(key)}`;
+    },
+    childrenUrl(prefix) {
+      // 根目录（空前缀）用尾斜杠形式：wrangler 会把空的 ?name= 解析成 null，
+      // 导致回退到占位段 _fd_ 而列出空目录
+      if (!prefix) return `/api/children/`;
+      return `/api/children/_fd_?name=${encodeURIComponent(prefix)}`;
     },
 
     // 自定义登录：用户输入凭据 → 前端生成 token → 发送到后端验证 → 成功则存入 sessionStorage
@@ -818,7 +836,7 @@ export default {
 
     fetchFiles() {
       this.loading = true;
-      this.apiFetch(`/api/children/${this.cwd}`)
+      this.apiFetch(this.childrenUrl(this.cwd))
         .then((res) => {
           if (!res.ok) {
             this.loading = false;
@@ -983,11 +1001,26 @@ export default {
       this.uploadAbortCtrl = new AbortController();
       const signal = this.uploadAbortCtrl.signal;
 
-      // —— ffmpeg 视频优化（faststart） ——
+      // —— 视频 faststart 优化（moov atom 前移） ——
       if (file.type?.startsWith('video/')) {
-        const FFMPEG_MAX = 500 * 1024 * 1024;
+        const FFMPEG_MAX = 1500 * 1024 * 1024; // 1.5GB
         if (file.size > FFMPEG_MAX) {
-          this.showToast(`${file.name} 超过 500MB，跳过 ffmpeg 优化（建议本地执行）`);
+          // 超限文件先快速检测 moov 是否已在头部，避免对已优化文件弹出无用提示
+          const alreadyFast = await isAlreadyFaststart(file);
+          if (!alreadyFast) {
+            const base = file.name.replace(/\.[^.]+$/, '');
+            const ext = file.name.split('.').pop();
+            const sq = (s) => `'${s.replace(/'/g, "'\\''")}'`;
+            const outName = `${base}_faststart.${ext}`;
+            const cmd = `ffmpeg -i ${sq(file.name)} -c copy -movflags faststart ${sq(outName)}`;
+            this.showToast(`${file.name} 超过 1.5GB，请本地运行：${cmd}`, {
+              label: '复制命令',
+              handler: () => {
+                navigator.clipboard.writeText(cmd);
+                this.showToast('命令已复制');
+              },
+            });
+          }
         } else {
           this.showToast(`正在优化视频：${file.name}`);
           this.uploadProgressLabel = `优化 ${file.name} ...`;
@@ -1042,7 +1075,7 @@ export default {
       try {
         this.uploadProgressLabel = `服务器接收处理中，${uploadFile.name} ...`;
         this.uploadProgress = 0;
-        const uploadUrl = `/api/write/items/${basedir}${uploadFile.name}`;
+        const uploadUrl = `/api/write/items/_fd_?name=${encodeURIComponent(basedir + uploadFile.name)}`;
         const headers = {};
 
         simulateTimer = setInterval(() => {
@@ -1104,7 +1137,7 @@ export default {
       const isFolder = key.endsWith("_$folder$");
       const displayName = isFolder ? key.slice(0, -9) : key;
       if (!window.confirm(isFolder ? `确定要删除文件夹 ${displayName} 及其所有内容吗？` : `确定要删除 ${displayName} 吗？`)) return;
-      await axios.delete(`/api/write/items/${key}`);
+      await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(key)}`);
       this.fetchFiles();
     },
 
@@ -1113,7 +1146,7 @@ export default {
       const newName = window.prompt("重命名为:", fileName);
       if (!newName) return;
       await this.copyPaste(key, `${this.cwd}${newName}`);
-      await axios.delete(`/api/write/items/${key}`);
+      await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(key)}`);
       this.fetchFiles();
     },
 
@@ -1131,13 +1164,13 @@ export default {
         const newMarker = newBasePath + '_$folder$';
 
         await this.copyPaste(oldMarker, newMarker);
-        await axios.delete(`/api/write/items/${oldMarker}`);
+        await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(oldMarker)}`);
 
         for (const item of allItems) {
           const relativePath = item.key.substring(oldBasePath.length);
           const newPath = newBasePath + relativePath;
           await this.copyPaste(item.key, newPath);
-          await axios.delete(`/api/write/items/${item.key}`);
+          await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(item.key)}`);
         }
 
         this.fetchFiles();
@@ -1255,7 +1288,7 @@ export default {
               await this.copyPaste(sourceBasePath + relativePath, newPath);
               // 删除原位置
               console.log('删除:', sourceBasePath + relativePath);
-              await axios.delete(`/api/write/items/${encodeURIComponent(sourceBasePath + relativePath)}`);
+              await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(sourceBasePath + relativePath)}`);
 
               // 收集子文件夹路径
               const pathParts = relativePath.split('/');
@@ -1280,7 +1313,7 @@ export default {
           for (const subFolder of subFolders) {
             const subFolderMarker = subFolder + '/_$folder$';
             try {
-              await axios.put(`/api/write/items/${subFolderMarker}`, '');
+              await axios.put(`/api/write/items/_fd_?name=${encodeURIComponent(subFolderMarker)}`, '');
             } catch (error) {
               console.error(`创建文件夹标记 ${subFolderMarker} 失败:`, error);
             }
@@ -1289,9 +1322,9 @@ export default {
           // 创建目标目录标记
           const targetFolderPath = targetBasePath + '_$folder$';
           console.log('创建目标目录标记:', targetFolderPath);
-          await axios.put(`/api/write/items/${targetFolderPath}`, '');
+          await axios.put(`/api/write/items/_fd_?name=${encodeURIComponent(targetFolderPath)}`, '');
           // 删除原目录标记
-          await axios.delete(`/api/write/items/${key}`);
+          await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(key)}`);
 
           // 清除进度
           this.uploadProgress = null;
@@ -1302,7 +1335,7 @@ export default {
           // 单文件移动逻辑
           const targetFilePath = normalizedPath + fileName;
           await this.copyPaste(key, targetFilePath);
-          await axios.delete(`/api/write/items/${key}`);
+          await axios.delete(`/api/write/items/_fd_?name=${encodeURIComponent(key)}`);
           // 刷新文件列表（留在当前目录）
           this.fetchFiles();
         }
@@ -1321,7 +1354,7 @@ export default {
       const normalizedPrefix = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
 
       do {
-        const url = new URL(`/api/children/${normalizedPrefix}`, window.location.origin);
+        const url = new URL(this.childrenUrl(normalizedPrefix), window.location.origin);
         if (marker) {
           url.searchParams.set('marker', marker);
         }
@@ -1355,7 +1388,7 @@ export default {
       const normalizedPrefix = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
 
       do {
-        const url = new URL(`/api/children/${normalizedPrefix}`, window.location.origin);
+        const url = new URL(this.childrenUrl(normalizedPrefix), window.location.origin);
         if (marker) {
           url.searchParams.set('marker', marker);
         }
@@ -2244,6 +2277,25 @@ export default {
   font-size: 14px;
   z-index: 10000;
   animation: toast-in 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 90vw;
+  word-break: break-all;
+}
+.toast-btn {
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.toast-btn:hover {
+  background: rgba(255,255,255,0.25);
 }
 
 @keyframes toast-in {
