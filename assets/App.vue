@@ -377,7 +377,7 @@
       </div>
     </div>
     <!-- 内建视频/音频播放器 -->
-    <div v-if="showPlayer" class="player-overlay" @click.self="showPlayer = false">
+    <div v-if="showPlayer" class="player-overlay">
       <div class="player-container">
         <div class="player-header">
           <span class="player-title" v-text="playerName"></span>
@@ -488,11 +488,6 @@ export default {
     if (containerEl) {
       this.resizeObserver.observe(containerEl);
     }
-    // Esc 关闭播放器
-    this._keyHandler = (e) => {
-      if (e.key === 'Escape' && this.showPlayer) this.showPlayer = false;
-    };
-    document.addEventListener('keydown', this._keyHandler);
 
     // 注册 Service Worker 用于视频/音频多线程预取加速
     this._swReadyPromise = Promise.resolve(false);
@@ -551,9 +546,6 @@ export default {
   beforeUnmount() {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
-    }
-    if (this._keyHandler) {
-      document.removeEventListener('keydown', this._keyHandler);
     }
   },
 
