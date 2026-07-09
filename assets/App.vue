@@ -1056,8 +1056,9 @@ export default {
           if (progressEvent.total) {
             const pct = (progressEvent.loaded * 100) / progressEvent.total;
             const capped = Math.min(pct, 98);
-            // 真实进度优先，直接覆盖（不再用 > 守卫，避免被模拟值掩盖）
-            this.uploadProgress = capped;
+            // 真实进度优先，但不回退：multipart 分块间隙中模拟值可能已推高，
+            // 下一个块的起始进度不应覆盖为更低的值
+            this.uploadProgress = Math.max(this.uploadProgress, capped);
             this.uploadProgressLabel = `上传 ${uploadFile.name} ...`;
             lastRealProgressAt = Date.now();
           }
