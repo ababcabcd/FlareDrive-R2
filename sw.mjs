@@ -10,7 +10,7 @@
  * - 支持精确 Range 匹配和覆盖匹配（大段缓存可服务于子区间）
  */
 
-const VIDEO_CACHE = 'video-chunks-v2';
+const VIDEO_CACHE = 'video-chunks-v3';
 const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 对齐单位
 const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk (~120MB)
 
@@ -36,12 +36,42 @@ function extractRange(keyUrl) {
   return { start, end };
 }
 
+// 解析响应 Content-Range: bytes start-end/total，返回实际区间与总大小
+function parseContentRange(header) {
+  if (!header) return null;
+  const m = header.match(/^bytes (\d+)-(\d+)\/(\d+|\*)$/);
+  if (!m) return null;
+  const start = parseInt(m[1], 10);
+  const end = parseInt(m[2], 10);
+  const total = m[3] === '*' ? null : parseInt(m[3], 10);
+  if (isNaN(start) || isNaN(end) || start > end) return null;
+  return { start, end, total };
+}
+
+// 从已缓存响应中提取文件总大小（优先 X-Total-Size，其次 Content-Range）
+function getTotalSize(response) {
+  const custom = response.headers.get('X-Total-Size');
+  if (custom) {
+    const n = parseInt(custom, 10);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  const cr = response.headers.get('Content-Range');
+  if (cr) {
+    const m = cr.match(/\/(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
 // ------------------------- 响应构建 -------------------------
 
-function build206Response(buffer, range, contentType) {
+function build206Response(buffer, range, contentType, totalSize) {
   const headers = new Headers();
   headers.set('Content-Type', contentType || 'video/mp4');
-  headers.set('Content-Range', `bytes ${range.start}-${range.end}/*`);
+  headers.set('Content-Range', `bytes ${range.start}-${range.end}/${totalSize || '*'}`);
   headers.set('Content-Length', String(buffer.byteLength));
   headers.set('Accept-Ranges', 'bytes');
   headers.set('Cache-Control', 'private, max-age=3600');
@@ -55,14 +85,16 @@ function build206Response(buffer, range, contentType) {
 async function serveFromCache(url, range) {
   const cache = await caches.open(VIDEO_CACHE);
   let contentType = 'video/mp4';
+  let totalSize = null;
 
   // 1. 精确匹配：prefetch 写入的 chunk 与 video 请求的 Range 完全一致
   const exactKey = `${url}|${range.start}-${range.end}`;
   const exactMatch = await cache.match(exactKey);
   if (exactMatch) {
     contentType = exactMatch.headers.get('Content-Type') || contentType;
+    totalSize = getTotalSize(exactMatch) || totalSize;
     const buffer = await exactMatch.arrayBuffer();
-    return build206Response(buffer, range, contentType);
+    return build206Response(buffer, range, contentType, totalSize);
   }
 
   // 2. 覆盖匹配：已有更大的缓存 chunk，从中切出所需的子区间
@@ -76,10 +108,11 @@ async function serveFromCache(url, range) {
       const entry = await cache.match(req);
       if (entry) {
         contentType = entry.headers.get('Content-Type') || contentType;
+        totalSize = getTotalSize(entry) || totalSize;
         const buffer = await entry.arrayBuffer();
         const offset = range.start - cacheRange.start;
         const length = range.end - range.start + 1;
-        return build206Response(buffer.slice(offset, offset + length), range, contentType);
+        return build206Response(buffer.slice(offset, offset + length), range, contentType, totalSize);
       }
     }
   }
@@ -102,6 +135,7 @@ async function serveFromCache(url, range) {
       if (!entry) { chunkEntries.length = 0; break; } // 缺失任一块则放弃拼接
       const buffer = await entry.arrayBuffer();
       contentType = entry.headers.get('Content-Type') || contentType;
+      totalSize = getTotalSize(entry) || totalSize;
       chunkEntries.push({ buffer, start });
     }
 
@@ -115,7 +149,7 @@ async function serveFromCache(url, range) {
       }
       const sliceStart = range.start - firstChunk * CHUNK_SIZE;
       const sliceEnd = sliceStart + (range.end - range.start);
-      return build206Response(merged.slice(sliceStart, sliceEnd + 1), range, contentType);
+      return build206Response(merged.slice(sliceStart, sliceEnd + 1), range, contentType, totalSize);
     }
   }
 
@@ -159,24 +193,42 @@ async function fetchAndCache(request, event) {
 
   // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储
   if (rawResponse.ok && rawResponse.status === 206 && rangeHeader && event) {
-    const range = parseRange(rangeHeader);
-    if (range) {
-      const cloned = rawResponse.clone();
-      event.waitUntil(
-        caches.open(VIDEO_CACHE).then(async (cache) => {
-          try {
-            await cache.put(`${url}|${range.start}-${range.end}`, cloned);
-            // LRU 淘汰：超过上限则删除最早的条目
-            const keys = await cache.keys();
-            if (keys.length > MAX_CACHE_ENTRIES) {
-              const toDelete = keys.slice(0, keys.length - MAX_CACHE_ENTRIES);
-              await Promise.all(toDelete.map(k => cache.delete(k)));
+    const reqRange = parseRange(rangeHeader);
+    const actualRange = parseContentRange(rawResponse.headers.get('Content-Range'));
+    // 必须按响应实际区间缓存：Worker 会把大 Range 夹紧，
+    // 若用请求区间作 key，后续按 key 切片会拿到错误/截断的数据。
+    if (reqRange && actualRange) {
+      const actualSize = actualRange.end - actualRange.start + 1;
+      // 仅缓存 <= 2MB 的 chunk，避免 10MB 大 chunk 快速占满 Cache API 配额。
+      // 小文件（<=100MB）Worker 已改用 2MB 夹紧，可正常写入缓存。
+      if (actualSize <= CHUNK_SIZE) {
+        const cloned = rawResponse.clone();
+        // 把总大小持久化进缓存，避免 build206Response 丢失总大小
+        const cachedHeaders = new Headers(cloned.headers);
+        if (actualRange.total && !cachedHeaders.has('X-Total-Size')) {
+          cachedHeaders.set('X-Total-Size', String(actualRange.total));
+        }
+        const cachedResponse = new Response(cloned.body, {
+          status: cloned.status,
+          statusText: cloned.statusText,
+          headers: cachedHeaders,
+        });
+        event.waitUntil(
+          caches.open(VIDEO_CACHE).then(async (cache) => {
+            try {
+              await cache.put(`${url}|${actualRange.start}-${actualRange.end}`, cachedResponse);
+              // LRU 淘汰：超过上限则删除最早的条目
+              const keys = await cache.keys();
+              if (keys.length > MAX_CACHE_ENTRIES) {
+                const toDelete = keys.slice(0, keys.length - MAX_CACHE_ENTRIES);
+                await Promise.all(toDelete.map(k => cache.delete(k)));
+              }
+            } catch (e) {
+              console.warn('[SW] cache store failed:', e.message);
             }
-          } catch (e) {
-            console.warn('[SW] cache store failed:', e.message);
-          }
-        })
-      );
+          })
+        );
+      }
     }
   }
 

@@ -221,6 +221,13 @@ export async function onRequestGet(context) {
     var token = "${token}";
     var fileUrl = '/api/share/download/?token=' + token;
     var shareFileName = '';
+
+    // 分享落地页独立打开时也可能没有 SW，主动注册以确保视频缓存生效
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.mjs', { scope: '/', updateViaCache: 'none' })
+        .then(function(reg) { reg.update().catch(function() {}); })
+        .catch(function() {});
+    }
     
     function isImage(type) { return type && /^image\\//.test(type); }
     function isVideo(type) { return type && /^video\\//.test(type); }
@@ -345,9 +352,15 @@ export async function onRequestGet(context) {
             '<button class="download-btn" onclick="downloadFile()">' +
               '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
             '</button>';
-          // 视频启动多线程预取
+          // 视频启动多线程预取：等元数据解析完成后再开始，避免与 Safari 读取 moov 竞争
           if (isVideo(data.contentType)) {
-            setTimeout(function() { var v = app.querySelector('video'); if (v) _pfStart(v); }, 50);
+            setTimeout(function() {
+              var v = app.querySelector('video');
+              if (!v) return;
+              function start() { _pfStart(v); }
+              if (v.readyState >= 1) { start(); }
+              else { v.addEventListener('loadedmetadata', start, { once: true }); }
+            }, 50);
           }
         } else {
           app.innerHTML = 
