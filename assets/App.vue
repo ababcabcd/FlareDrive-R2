@@ -237,66 +237,66 @@
         <div v-text="focusedItem.key || focusedItem" class="contextmenu-filename" @click.stop.prevent
           style="height:20px;width: 100%; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
       </div>
-      <ul v-if="typeof focusedItem === 'string'" class="contextmenu-list">
+      <ul v-if="typeof focusedItem === 'string'" class="contextmenu-list" @click.stop>
         <li>
-          <button @click="copyLink(`/?p=${encodeURIComponent(focusedItem)}`)">
+          <button @click.stop="copyLink(`/?p=${encodeURIComponent(focusedItem)}`); showContextMenu = false">
             <span>复制链接</span>
           </button>
         </li>
         <li>
-          <button @click="renameFolder(focusedItem)">
+          <button @click.stop="renameFolder(focusedItem); showContextMenu = false">
             <span>重命名</span>
           </button>
         </li>
         <li>
-          <button @click="moveFile(focusedItem + '_$folder$')">
+          <button @click.stop="moveFile(focusedItem + '_$folder$'); showContextMenu = false">
             <span>移动</span>
           </button>
         </li>
         <li>
-          <button style="color: red" @click="removeFile(focusedItem + '_$folder$')">
+          <button style="color: red" @click.stop="removeFile(focusedItem + '_$folder$'); showContextMenu = false">
             <span>删除</span>
           </button>
         </li>
       </ul>
       <ul v-else class="contextmenu-list" @click.stop>
         <li>
-          <button @click.stop="renameFile(focusedItem.key)">
+          <button @click.stop="renameFile(focusedItem.key); showContextMenu = false">
             <span>重命名</span>
           </button>
         </li>
         <li>
-          <a :href="rawUrl(focusedItem.key)" target="_blank" download @click.stop>
+          <a :href="rawUrl(focusedItem.key)" target="_blank" :download="focusedItem.key.split('/').pop()" @click.stop="showContextMenu = false">
             <span>下载</span>
           </a>
         </li>
         <li>
-          <button @click.stop="multiThreadDownload(focusedItem.key, focusedItem.key.split('/').pop())">
+          <button @click.stop="multiThreadDownload(focusedItem.key, focusedItem.key.split('/').pop()); showContextMenu = false">
             <span>多线程下载</span>
           </button>
         </li>
         <li>
-          <button @click.stop="clipboard = focusedItem.key">
+          <button @click.stop="clipboard = focusedItem.key; showContextMenu = false">
             <span>复制</span>
           </button>
         </li>
         <li>
-          <button @click.stop="moveFile(focusedItem.key)">
+          <button @click.stop="moveFile(focusedItem.key); showContextMenu = false">
             <span>移动</span>
           </button>
         </li>
         <li>
-          <button @click.stop="copyLink(rawUrl(focusedItem.key))">
+          <button @click.stop="copyLink(rawUrl(focusedItem.key)); showContextMenu = false">
             <span>复制链接</span>
           </button>
         </li>
         <li>
-          <button @click.stop="openShareModal(focusedItem.key)">
+          <button @click.stop="openShareModal(focusedItem.key); showContextMenu = false">
             <span>分享文件</span>
           </button>
         </li>
         <li>
-          <button style="color: red" @click="removeFile(focusedItem.key)">
+          <button style="color: red" @click.stop="removeFile(focusedItem.key); showContextMenu = false">
             <span>删除</span>
           </button>
         </li>

@@ -150,6 +150,15 @@ export async function onRequestGet(context: any) {
   // 兜底：修正 R2 未识别的 MIME 类型（如已上传的视频/音频被存为 octet-stream）
   fixContentType(headers, path);
 
+  // 设置 Content-Disposition 以便浏览器下载时使用正确的文件名
+  // （URL 路径中的 _fd_ 占位段不含真实文件名，浏览器会错误地使用 _fd_ 作为文件名）
+  if (path && !path.startsWith("_$flaredrive$/thumbnails/")) {
+    const fileName = path.split('/').pop();
+    if (fileName) {
+      headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(fileName)}"`);
+    }
+  }
+
   if (!headers.has("Accept-Ranges")) {
     headers.set("Accept-Ranges", "bytes");
   }
