@@ -1690,7 +1690,23 @@ export default {
             headers: { ...authHeaders, Range: `bytes=${start}-${end}` },
             signal,
           });
-          if (res.ok) return await res.arrayBuffer();
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            // 写入 Cache API，SW 可复用同一 chunk 响应 seek-back 请求
+            try {
+              const cache = await caches.open('video-chunks-v2');
+              const key = `${url}|${start}-${end}`;
+              cache.put(key, new Response(buf, {
+                status: 206,
+                headers: {
+                  'Content-Type': res.headers.get('Content-Type') || 'video/mp4',
+                  'Content-Range': `bytes ${start}-${end}/*`,
+                  'Content-Length': String(buf.byteLength),
+                },
+              })).catch(() => {});
+            } catch (_) { /* Cache API 可能不可用，静默忽略 */ }
+            return buf;
+          }
           // 4xx 不重试（客户端错误），5xx 重试
           if (res.status < 500) throw new Error(`${res.status}`);
           throw new Error(`${res.status}`);
