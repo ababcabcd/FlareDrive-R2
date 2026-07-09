@@ -1786,7 +1786,16 @@ export default {
 
   watch: {
     showPlayer(val) {
-      if (!val) this._stopVideoPrefetch();
+      if (!val) {
+        // 先停止浏览器原生视频请求：pause + 清空 src + load 触发取消
+        const el = this.$refs.videoPlayer;
+        if (el) {
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+        }
+        this._stopVideoPrefetch();
+      }
     },
     cwd: {
       handler() {
