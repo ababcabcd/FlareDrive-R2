@@ -259,39 +259,39 @@
           </button>
         </li>
       </ul>
-      <ul v-else class="contextmenu-list">
+      <ul v-else class="contextmenu-list" @click.stop>
         <li>
-          <button @click="renameFile(focusedItem.key)">
+          <button @click.stop="renameFile(focusedItem.key)">
             <span>重命名</span>
           </button>
         </li>
         <li>
-          <a :href="rawUrl(focusedItem.key)" target="_blank" download>
+          <a :href="rawUrl(focusedItem.key)" target="_blank" download @click.stop>
             <span>下载</span>
           </a>
         </li>
         <li>
-          <button @click="multiThreadDownload(focusedItem.key, focusedItem.key.split('/').pop())">
+          <button @click.stop="multiThreadDownload(focusedItem.key, focusedItem.key.split('/').pop())">
             <span>多线程下载</span>
           </button>
         </li>
         <li>
-          <button @click="clipboard = focusedItem.key">
+          <button @click.stop="clipboard = focusedItem.key">
             <span>复制</span>
           </button>
         </li>
         <li>
-          <button @click="moveFile(focusedItem.key)">
+          <button @click.stop="moveFile(focusedItem.key)">
             <span>移动</span>
           </button>
         </li>
         <li>
-          <button @click="copyLink(rawUrl(focusedItem.key))">
+          <button @click.stop="copyLink(rawUrl(focusedItem.key))">
             <span>复制链接</span>
           </button>
         </li>
         <li>
-          <button @click="openShareModal(focusedItem.key)">
+          <button @click.stop="openShareModal(focusedItem.key)">
             <span>分享文件</span>
           </button>
         </li>
@@ -899,9 +899,25 @@ export default {
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${r.index} 返回 ${res.status}`);
         }
-        const buf = new Uint8Array(await res.arrayBuffer());
-        received += buf.length;
-        updateProgress();
+        // 流式读取：每收到一个网络 chunk 就更新进度，避免整段 arrayBuffer 完成前进度卡在 0%
+        const reader = res.body.getReader();
+        const chunks = [];
+        let chunkReceived = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          chunkReceived += value.length;
+          received += value.length;
+          updateProgress();
+        }
+        // 合并本分块
+        const buf = new Uint8Array(chunkReceived);
+        let offset = 0;
+        for (const chunk of chunks) {
+          buf.set(chunk, offset);
+          offset += chunk.length;
+        }
         if (writable) {
           // 顺序写：每个写操作挂在前一个之后，保证字节顺序
           writeChain = writeChain.then(() => writable.write(buf));

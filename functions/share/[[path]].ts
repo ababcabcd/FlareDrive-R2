@@ -437,10 +437,26 @@ export async function onRequestGet(context) {
             var r = queue.shift();
             var res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
-            var buf = new Uint8Array(await res.arrayBuffer());
-            received += buf.length;
-            var pct = total ? (received / total) * 100 : 0;
-            showDlProgress(pct, '下载 ' + shareFileName + ' ... ' + Math.round(pct) + '%');
+            // 流式读取：每收到一个网络 chunk 就更新进度，避免整段 arrayBuffer 完成前进度卡在 0%
+            var reader = res.body.getReader();
+            var chunks = [];
+            var chunkReceived = 0;
+            while (true) {
+              var result = await reader.read();
+              if (result.done) break;
+              chunks.push(result.value);
+              chunkReceived += result.value.length;
+              received += result.value.length;
+              var pct = total ? (received / total) * 100 : 0;
+              showDlProgress(pct, '下载 ' + shareFileName + ' ... ' + Math.round(pct) + '%');
+            }
+            // 合并本分块并按顺序写入
+            var buf = new Uint8Array(chunkReceived);
+            var offset = 0;
+            for (var i = 0; i < chunks.length; i++) {
+              buf.set(chunks[i], offset);
+              offset += chunks[i].length;
+            }
             // 顺序写：每个写操作挂在前一个之后，保证字节顺序；用 IIFE 捕获当前 buf 避免闭包串块
             (function (b) { writeChain = writeChain.then(function () { return writable.write(b); }); })(buf);
           }
