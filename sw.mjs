@@ -147,14 +147,15 @@ function withCors(response) {
 
 async function fetchAndCache(request, event) {
   // 不使用 event.request 直接 fetch：Safari 可能保留原始请求的 opaque/no-cors 模式，
-  // 导致 SW 拿不到带 CORS 头的完整响应。从 URL 重新构造 Request 确保 mode 干净。
+  // 导致 SW 拿不到带 CORS 头的完整响应。
+  // 使用 fetch(url, opts) 而非 new Request()：后者在 Safari SW 中有兼容问题，
+  // 且需要手动传递 method（否则 HEAD 变 GET 会导致分享页阻塞下载全文件）。
   const url = request.url;
-  const headers = new Headers(request.headers);
-  // 确保 Range 头被保留
-  const rangeHeader = headers.get('Range');
-  const req = new Request(url, { headers });
-
-  const rawResponse = await fetch(req);
+  const rangeHeader = request.headers.get('Range');
+  const rawResponse = await fetch(url, {
+    method: request.method,
+    headers: request.headers,
+  });
 
   // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储
   if (rawResponse.ok && rawResponse.status === 206 && rangeHeader && event) {
