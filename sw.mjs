@@ -122,17 +122,45 @@ async function serveFromCache(url, range) {
   return null; // 缓存未命中
 }
 
+// ------------------------- CORS 安全响应包装 -------------------------
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, Content-Type',
+};
+
+function withCors(response) {
+  // 已包含 Allow-Origin 头则跳过（避免重复）
+  if (response.headers.has('Access-Control-Allow-Origin')) return response;
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  // Safari SW 返回的 Response 若被识别为 opaque，媒体元素会拒绝播放；
+  // 显式构造新 Response 确保 CORS 头嵌入
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 // ------------------------- 网络请求 + 后台缓存 -------------------------
 
 async function fetchAndCache(request, event) {
-  const response = await fetch(request);
+  // 不使用 event.request 直接 fetch：Safari 可能保留原始请求的 opaque/no-cors 模式，
+  // 导致 SW 拿不到带 CORS 头的完整响应。从 URL 重新构造 Request 确保 mode 干净。
+  const url = request.url;
+  const headers = new Headers(request.headers);
+  // 确保 Range 头被保留
+  const rangeHeader = headers.get('Range');
+  const req = new Request(url, { headers });
+
+  const rawResponse = await fetch(req);
 
   // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储
-  if (response.ok && response.status === 206) {
-    const url = request.url;
-    const range = parseRange(request.headers.get('Range'));
-    if (range && event) {
-      const cloned = response.clone();
+  if (rawResponse.ok && rawResponse.status === 206 && rangeHeader && event) {
+    const range = parseRange(rangeHeader);
+    if (range) {
+      const cloned = rawResponse.clone();
       event.waitUntil(
         caches.open(VIDEO_CACHE).then(async (cache) => {
           try {
@@ -144,7 +172,6 @@ async function fetchAndCache(request, event) {
               await Promise.all(toDelete.map(k => cache.delete(k)));
             }
           } catch (e) {
-            // 存储满或其它异常，静默处理
             console.warn('[SW] cache store failed:', e.message);
           }
         })
@@ -152,7 +179,8 @@ async function fetchAndCache(request, event) {
     }
   }
 
-  return response;
+  // 显式追加 CORS 头：Safari 对 SW 拦截的媒体请求要求 Response 必须包含 Allow-Origin
+  return withCors(rawResponse);
 }
 
 // ===================== Event Listeners =====================
