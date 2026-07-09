@@ -10,7 +10,7 @@
  * - 支持精确 Range 匹配和覆盖匹配（大段缓存可服务于子区间）
  */
 
-const VIDEO_CACHE = 'video-chunks-v3';
+const VIDEO_CACHE = 'video-chunks-v4';
 const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 对齐单位
 const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk (~120MB)
 
@@ -185,22 +185,21 @@ async function fetchAndCache(request, event) {
   // 使用 fetch(url, opts) 而非 new Request()：后者在 Safari SW 中有兼容问题，
   // 且需要手动传递 method（否则 HEAD 变 GET 会导致分享页阻塞下载全文件）。
   const url = request.url;
-  const rangeHeader = request.headers.get('Range');
   const rawResponse = await fetch(url, {
     method: request.method,
     headers: request.headers,
   });
 
-  // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储
-  if (rawResponse.ok && rawResponse.status === 206 && rangeHeader && event) {
-    const reqRange = parseRange(rangeHeader);
+  // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储。
+  // 不要求请求必须有 Range：Safari 初始请求可能不带 Range，但 Worker 会补上并
+  // 返回 206，这个响应按实际 Content-Range 缓存即可。
+  // 也不要求请求 Range 与响应 Range 一致：Worker 会把大 Range 夹紧，实际
+  // Content-Range 才是 response body 的真实区间。
+  if (rawResponse.ok && rawResponse.status === 206 && event) {
     const actualRange = parseContentRange(rawResponse.headers.get('Content-Range'));
-    // 必须按响应实际区间缓存：Worker 会把大 Range 夹紧，
-    // 若用请求区间作 key，后续按 key 切片会拿到错误/截断的数据。
-    if (reqRange && actualRange) {
+    if (actualRange) {
       const actualSize = actualRange.end - actualRange.start + 1;
-      // 仅缓存 <= 2MB 的 chunk，避免 10MB 大 chunk 快速占满 Cache API 配额。
-      // 小文件（<=100MB）Worker 已改用 2MB 夹紧，可正常写入缓存。
+      // 仅缓存 <= 2MB 的 chunk，避免 10MB 大 chunk 快速占满 Cache API 配额
       if (actualSize <= CHUNK_SIZE) {
         const cloned = rawResponse.clone();
         // 把总大小持久化进缓存，避免 build206Response 丢失总大小
@@ -276,22 +275,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  const secFetchDest = (event.request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
-  const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio';
-
   event.respondWith(
     (async () => {
-      if (isMediaRequest) {
-        // <video>/<audio> 元素请求：优先命中缓存
-        const range = parseRange(event.request.headers.get('Range'));
-        if (range) {
-          const cached = await serveFromCache(url.href, range);
-          if (cached) {
-            console.log(`[SW] cache HIT  ${range.start}-${range.end}`);
-            return cached;
-          }
-          console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
+      // 对所有带 Range 的请求优先查缓存（不仅是 video/audio 元素请求），
+      // 这样预取 fetch 也能复用已缓存的 chunk，避免重复网络请求浪费带宽
+      const range = parseRange(event.request.headers.get('Range'));
+      if (range) {
+        const cached = await serveFromCache(url.href, range);
+        if (cached) {
+          console.log(`[SW] cache HIT  ${range.start}-${range.end}`);
+          return cached;
         }
+        console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
       }
       // 网络获取 + 异步缓存
       return fetchAndCache(event.request, event);
