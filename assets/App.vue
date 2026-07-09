@@ -1801,15 +1801,13 @@ export default {
         if (!this._prefetchActive) return;
         const currentByte = this._estimateCurrentByte(video);
         const CHUNK_SIZE = 2 * 1024 * 1024;
-        const windowStart = Math.max(0, this._prefetchEndByte - 10 * 1024 * 1024);
         const windowEnd = this._prefetchEndByte + CHUNK_SIZE;
-        // 如果目标已经在当前预取窗口内，不用重启
-        if (currentByte >= windowStart && currentByte <= windowEnd) return;
+        // 只在向前跳到预取范围之外时才重启；向后跳已缓存区域不干预
+        if (currentByte <= windowEnd) return;
 
-        console.log('[Prefetch] seek to byte', currentByte, 'restart');
+        console.log('[Prefetch] seek forward to byte', currentByte, 'restart');
         // 跳过当前播放位置后一个 chunk，避免和播放器刚 seek 完要拿的数据抢
         const startByte = Math.min(this._prefetchFileSize, currentByte + CHUNK_SIZE);
-        // 先取消正在跑的批次，让 _prefetchBatchRunning 归位
         if (this._prefetchCtrl) this._prefetchCtrl.abort();
         this._prefetchCtrl = new AbortController();
         this._prefetchBatchRunning = false;

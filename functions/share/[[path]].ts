@@ -276,7 +276,8 @@ export async function onRequestGet(context) {
     function _pfOnSeek(e) {
       if (!_pf.active) return;
       var b = _pfByte(e.target);
-      if (b > _pf.endByte || b < _pf.endByte - 10 * 1024 * 1024) {
+      // 只在向前跳到预取范围之外时才重启；向后跳说明用户在重看已缓存区域，切勿干预
+      if (b > _pf.endByte + 10 * 1024 * 1024) {
         if (_pf.ctrl) _pf.ctrl.abort();
         _pf.ctrl = new AbortController();
         _pf.running = false;
