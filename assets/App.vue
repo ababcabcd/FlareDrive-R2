@@ -1681,6 +1681,27 @@ export default {
       return Math.floor((videoEl.currentTime / dur) * this._prefetchFileSize);
     },
 
+    /** 带重试的单 chunk 请求：网络错误 / 5xx 自动重试，最多 2 次，指数退避 */
+    async _fetchChunkWithRetry(url, start, end, signal, retries = 2) {
+      const authHeaders = this._prefetchAuthHeaders();
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const res = await fetch(url, {
+            headers: { ...authHeaders, Range: `bytes=${start}-${end}` },
+            signal,
+          });
+          if (res.ok) return await res.arrayBuffer();
+          // 4xx 不重试（客户端错误），5xx 重试
+          if (res.status < 500) throw new Error(`${res.status}`);
+          throw new Error(`${res.status}`);
+        } catch (err) {
+          if (err.name === 'AbortError') throw err;  // 用户关闭/seek 不重试
+          if (attempt === retries) throw err;
+          await new Promise(r => setTimeout(r, 200 * Math.pow(2, attempt)));
+        }
+      }
+    },
+
     async _prefetchBatch(fromByte) {
       if (this._prefetchBatchRunning) return;
       this._prefetchBatchRunning = true;
@@ -1716,10 +1737,7 @@ export default {
           const slice = toFetch.slice(i, i + PARALLEL);
           const batchResults = await Promise.allSettled(
             slice.map(({ start, end }) =>
-              fetch(url, {
-                headers: { ...this._prefetchAuthHeaders(), Range: `bytes=${start}-${end}` },
-                signal: ctrl.signal,
-              }).then(r => { if (r.ok) return r.arrayBuffer(); throw new Error(`${r.status}`); })
+              this._fetchChunkWithRetry(url, start, end, ctrl.signal)
             )
           );
           if (this._prefetchCtrl !== ctrl) return; // controller 被替换，退出
