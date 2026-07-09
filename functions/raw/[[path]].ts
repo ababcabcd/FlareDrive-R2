@@ -42,6 +42,31 @@ function buildCorsHeaders(): Headers {
   return headers;
 }
 
+// RFC 5987 编码 Content-Disposition 文件名，支持中文/特殊字符
+function encodeContentDisposition(fileName: string): string {
+  const encoded = encodeURIComponent(fileName);
+  return `inline; filename="${fileName}"; filename*=UTF-8''${encoded}`;
+}
+
+// 解析单区间 Range 头：bytes=start-end
+type ByteRange = { start: number; end: number };
+function parseByteRange(rangeHeader: string | null): ByteRange | null {
+  if (!rangeHeader) return null;
+  const match = rangeHeader.match(/^bytes=(\d+)-(\d+)$/);
+  if (!match) return null;
+  const start = parseInt(match[1], 10);
+  const end = parseInt(match[2], 10);
+  if (isNaN(start) || isNaN(end) || start < 0 || end < start) return null;
+  return { start, end };
+}
+
+// 判断 Range 是否为显式小范围，可安全走 Worker 代理
+function isSmallRange(rangeHeader: string | null, maxBytes: number): boolean {
+  const range = parseByteRange(rangeHeader);
+  if (!range) return false;
+  return range.end - range.start + 1 <= maxBytes;
+}
+
 // 鉴权检查的公共逻辑
 function checkAuth(context: any): Response | null {
   const [bucket, path] = parseBucketPath(context);
@@ -111,8 +136,9 @@ export async function onRequestHead(context: any) {
   });
 }
 
-// GET 请求 — 与 HEAD 不同，浏览器 <video>/<audio>（no-cors 模式，不需要 CORS 头）直接 302 到 CDN
-// 其他请求（JS fetch 预取、图片等）代理 R2 内容，确保 CORS 头完整返回
+// GET 请求 — 浏览器原生 <video>/<audio> 的完整 GET/超大 Range 走 302 直连 CDN，
+// 中小 Range（seek、prefetch）走 Worker 代理，和 prefetch 共享缓存并确保 206 正确返回。
+// 其他请求（JS fetch 预取、图片、下载等）代理 R2 内容，确保 CORS 头完整返回。
 export async function onRequestGet(context: any) {
   const authError = checkAuth(context);
   if (authError) return authError;
@@ -121,11 +147,16 @@ export async function onRequestGet(context: any) {
   const request = context.request;
   const [_, path] = parseBucketPath(context);
 
-  // 浏览器原生 <video>/<audio> 请求（Sec-Fetch-Dest: video/audio）使用 no-cors 模式，
-  // 且 Safari 对 faststart 视频会发巨量 Range（如 2.9GB），Pages Function 代理会超时/断连。
-  // 走 302 直连 CDN，绕过 Worker 体量限制。
+  // 浏览器原生 <video>/<audio> 请求处理策略：
+  // - 无 Range 或超大/开放式 Range（如 Safari 2.9GB）走 302 直连 CDN，避免 Worker 代理超时/断连。
+  // - 明确的中小 Range（seek、prefetch 的 2MB chunk 等）走 Worker 代理，和 prefetch 共享缓存，
+  //   并确保返回正确的 206 Partial Content，解决拖动进度条后无法播放的问题。
   const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
-  if (secFetchDest === 'video' || secFetchDest === 'audio') {
+  const rangeHeader = request.headers.get('Range');
+  const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio';
+  const MAX_PROXY_MEDIA_RANGE = 100 * 1024 * 1024; // 100MB
+
+  if (isMediaRequest && (!rangeHeader || !isSmallRange(rangeHeader, MAX_PROXY_MEDIA_RANGE))) {
     const redirectHeaders = new Headers(buildCorsHeaders());
     redirectHeaders.set('Location', url);
     redirectHeaders.set('Cache-Control', 'no-cache');
@@ -152,10 +183,11 @@ export async function onRequestGet(context: any) {
 
   // 设置 Content-Disposition 以便浏览器下载时使用正确的文件名
   // （URL 路径中的 _fd_ 占位段不含真实文件名，浏览器会错误地使用 _fd_ 作为文件名）
-  if (path && !path.startsWith("_$flaredrive$/thumbnails/")) {
+  // 注意：视频/音频流式请求不设置，避免影响播放器内联解析 Range 响应。
+  if (path && !path.startsWith("_$flaredrive$/thumbnails/") && !isMediaRequest) {
     const fileName = path.split('/').pop();
     if (fileName) {
-      headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(fileName)}"`);
+      headers.set("Content-Disposition", encodeContentDisposition(fileName));
     }
   }
 
