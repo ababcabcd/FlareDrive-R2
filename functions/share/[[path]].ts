@@ -352,15 +352,15 @@ export async function onRequestGet(context) {
             '<button class="download-btn" onclick="downloadFile()">' +
               '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
             '</button>';
-          // 视频启动多线程预取：等元数据解析完成后再开始，避免与 Safari 读取 moov 竞争
+          // 视频预取：等视频真正开始播放后再启动（playing 事件），
+          // 避免预取与浏览器初始 buffer 加载争抢同一 Range，拖慢首帧。
           if (isVideo(data.contentType)) {
-            setTimeout(function() {
-              var v = app.querySelector('video');
-              if (!v) return;
+            var v = app.querySelector('video');
+            if (v) {
               function start() { _pfStart(v); }
-              if (v.readyState >= 1) { start(); }
-              else { v.addEventListener('loadedmetadata', start, { once: true }); }
-            }, 50);
+              if (!v.paused) { start(); }
+              else { v.addEventListener('playing', start, { once: true }); }
+            }
           }
         } else {
           app.innerHTML = 
