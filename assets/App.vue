@@ -2443,7 +2443,6 @@ export default {
   max-width: 1200px;
   max-height: 90vh;
   background: #000;
-  border-radius: 8px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
