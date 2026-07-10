@@ -218,13 +218,13 @@ export async function onRequestGet(context: any) {
   reqHeaders.delete('origin');
   reqHeaders.delete('referer');
 
-  // 媒体请求 + 有 Range：只夹紧从非零位置开始的超大 Range。
-  // Safari 初始请求通常是 bytes=0-...（含无界 bytes=0-），必须返回完整数据到
-  // 文件末尾；若夹紧到 10MB，Safari 会因响应不完整而卡死或报 MEDIA_ERR。
-  // 非零 seek（如 bytes=65536-...）夹紧到 10MB，避免单次 CDN 下载过大。
+  // 媒体请求 + 有 Range：只夹紧“远离文件头”的超大 Range（即 seek 到 >=10MB 之后）。
+  // Safari/Chrome 初始加载时起始位置通常很小（0 或只有几千字节），必须返回完整数据
+  // 到文件末尾，否则拿不到 moov/duration，进度条会显示 --:-- 并卡死。
+  // 起始位置 >= 10MB 的 seek 才夹紧到 10MB chunk，避免单次 CDN 下载过大。
   if (isMediaRequest) {
     const parsed = parseByteRange(rangeHeader);
-    if (parsed && parsed.start > 0 && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+    if (parsed && parsed.start >= MEDIA_CLAMP && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
       const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
       reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
     }
