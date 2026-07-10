@@ -1,6 +1,62 @@
 import { notFound, parseBucketPath } from "@/utils/bucket";
 import { can_access_path } from "@/utils/auth";
 
+// ========================= 边缘缓存层 =========================
+// 使用 Cloudflare Cache API（caches.default）在 Worker 层缓存 PUBURL 响应。
+// 同一视频被多人/多次观看时，后续 Range 请求直接从边缘节点返回，避免回源 R2。
+// 注意：cache.match 在 dev 环境可能不可用，此时 fallback 到直接 fetch。
+const EDGE_CACHE_TTL = 3600; // 边缘缓存 1 小时
+
+async function fetchWithEdgeCache(
+  pubUrl: string,
+  reqHeaders: Headers,
+  ctx: any,
+): Promise<Response> {
+  const cache = (caches as any)?.default as Cache | undefined;
+  const range = reqHeaders.get("Range") || "";
+
+  // 有边缘缓存时，优先查缓存
+  if (cache) {
+    const cacheKeyUrl = range
+      ? `${pubUrl}${pubUrl.includes("?") ? "&" : "?"}__r=${encodeURIComponent(range)}`
+      : pubUrl;
+    try {
+      const cached = await cache.match(cacheKeyUrl);
+      if (cached) return cached;
+    } catch (_) { /* dev 环境 fallthrough */ }
+
+    const response = await fetch(new Request(pubUrl, {
+      method: "GET",
+      headers: reqHeaders,
+      redirect: "follow",
+    }));
+
+    // 将 206 响应写入边缘缓存，后续命中的请求零回源
+    if (response.status === 206 && ctx?.waitUntil) {
+      const cloned = response.clone();
+      const cachedHeaders = new Headers(cloned.headers);
+      cachedHeaders.set("Cache-Control", `public, max-age=${EDGE_CACHE_TTL}, s-maxage=${EDGE_CACHE_TTL}`);
+      cachedHeaders.set("CDN-Cache-Control", `max-age=${EDGE_CACHE_TTL}`);
+      ctx.waitUntil(
+        cache.put(cacheKeyUrl, new Response(cloned.body, {
+          status: cloned.status,
+          statusText: cloned.statusText,
+          headers: cachedHeaders,
+        })).catch(() => {}),
+      );
+    }
+
+    return response;
+  }
+
+  // 无边缘缓存（dev / 非标准环境）：直接回源
+  return fetch(new Request(pubUrl, {
+    method: "GET",
+    headers: reqHeaders,
+    redirect: "follow",
+  }));
+}
+
 // MIME 类型修正映射：浏览器可内联预览的类型 vs R2 可能错误返回的 octet-stream
 const MIME_FALLBACK: Record<string, string> = {
   mp4: "video/mp4",
@@ -173,11 +229,7 @@ export async function onRequestGet(context: any) {
     // 小 Range：保持原样（已在 reqHeaders 中）
   }
 
-  const response = await fetch(new Request(url, {
-    method: "GET",
-    headers: reqHeaders,
-    redirect: "follow",
-  }));
+  const response = await fetchWithEdgeCache(url, reqHeaders, context);
 
   const headers = new Headers(response.headers);
   const corsHeaders = buildCorsHeaders();

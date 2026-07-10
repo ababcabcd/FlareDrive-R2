@@ -12,6 +12,56 @@
 
 import { notFound, parseBucketPath } from "@/utils/bucket";
 
+// ========================= 边缘缓存层 =========================
+const EDGE_CACHE_TTL = 3600;
+
+async function fetchWithEdgeCache(
+  pubUrl: string,
+  reqHeaders: Headers,
+  ctx: any,
+): Promise<Response> {
+  const cache = (caches as any)?.default as Cache | undefined;
+  const range = reqHeaders.get("Range") || "";
+
+  if (cache) {
+    const cacheKeyUrl = range
+      ? `${pubUrl}${pubUrl.includes("?") ? "&" : "?"}__r=${encodeURIComponent(range)}`
+      : pubUrl;
+    try {
+      const cached = await cache.match(cacheKeyUrl);
+      if (cached) return cached;
+    } catch (_) { /* dev */ }
+
+    const response = await fetch(new Request(pubUrl, {
+      method: "GET",
+      headers: reqHeaders,
+      redirect: "follow",
+    }));
+
+    if (response.status === 206 && ctx?.waitUntil) {
+      const cloned = response.clone();
+      const cachedHeaders = new Headers(cloned.headers);
+      cachedHeaders.set("Cache-Control", `public, max-age=${EDGE_CACHE_TTL}, s-maxage=${EDGE_CACHE_TTL}`);
+      cachedHeaders.set("CDN-Cache-Control", `max-age=${EDGE_CACHE_TTL}`);
+      ctx.waitUntil(
+        cache.put(cacheKeyUrl, new Response(cloned.body, {
+          status: cloned.status,
+          statusText: cloned.statusText,
+          headers: cachedHeaders,
+        })).catch(() => {}),
+      );
+    }
+
+    return response;
+  }
+
+  return fetch(new Request(pubUrl, {
+    method: "GET",
+    headers: reqHeaders,
+    redirect: "follow",
+  }));
+}
+
 // ------------------------- CORS -------------------------
 
 const CORS_HEADERS: [string, string][] = [
@@ -148,11 +198,7 @@ export async function onRequestGet(context: any) {
       }
     }
 
-    const response = await fetch(new Request(pubUrl, {
-      method: "GET",
-      headers: reqHeaders,
-      redirect: "follow",
-    }));
+    const response = await fetchWithEdgeCache(pubUrl, reqHeaders, context);
 
     const headers = new Headers(response.headers);
     applyCors(headers);
