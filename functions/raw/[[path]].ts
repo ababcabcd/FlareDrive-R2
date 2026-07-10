@@ -203,15 +203,14 @@ export async function onRequestGet(context: any) {
   // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
   // 这里使用混合检测：Sec-Fetch-Dest 直接为 video/audio → 媒体；否则
   // 带 Range 且扩展名为视频/音频格式 → 也是媒体（SW 流式转发）。
-  // 注意：不带 Range 的请求（Safari <video> 初始探测）不 clamp，
-  // 返回完整 200 响应让浏览器自行判断文件格式和大小，后续 Range 请求才 clamp。
-  // 如果 clamp 了初始探测为 206，Safari 会发超大 Range 补剩余数据，再 clamp
-  // 会导致浏览器认为响应不完整而卡住。
+  // 关键：必须同时有 Range 头才当作媒体请求处理。无 Range 的请求（Safari
+  // <video> 初始探测，secFetchDest=video）直接透传为 200 全文件，不做 clamp。
+  // 如果 clamp 了初始探测为 206/10MB，Safari 会因数据不完整而卡在 loading。
   const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
   const fileExt = ((path || '').split('.').pop() || '').toLowerCase();
   const isMediaExt = mediaExtensions.includes(fileExt);
-  const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio'
-    || (rangeHeader && isMediaExt);
+  const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio' || isMediaExt)
+    && rangeHeader !== null;
   const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB 上限，避免浪费带宽
 
   const reqHeaders = new Headers(request.headers);
@@ -219,13 +218,10 @@ export async function onRequestGet(context: any) {
   reqHeaders.delete('origin');
   reqHeaders.delete('referer');
 
-  // 媒体请求：夹紧 Range，确保单次 CDN 请求不超过 10MB
+  // 媒体请求 + 有 Range：夹紧超大 Range，避免单次 CDN 请求超过 10MB
   if (isMediaRequest) {
-    const parsed = rangeHeader ? parseByteRange(rangeHeader) : null;
-    if (!parsed) {
-      // 无 Range 或格式不标准（如 bytes=0-）：请求前 10MB
-      reqHeaders.set('Range', `bytes=0-${MEDIA_CLAMP - 1}`);
-    } else if (parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+    const parsed = parseByteRange(rangeHeader);
+    if (parsed && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
       // 超大 Range：夹紧到起始位置 + 10MB
       const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
       reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);

@@ -292,23 +292,19 @@ export async function onRequestGet(context: any) {
     // 1. Sec-Fetch-Dest 直接是 video/audio → 一定是媒体请求
     // 2. 否则，如果请求带了 Range 且文件扩展名是视频/音频格式 → 也是媒体请求
     //    （SW 转发的流式 Range 请求，Sec-Fetch-Dest 已丢失但保留了 Range）
-    // 注意：不带 Range 的初始探测请求不 clamp，返回完整 200 让浏览器自行判断。
-    // 如果 clamp 了初始探测为 206，浏览器会发超大 Range 补数据，再 clamp 会导致卡住。
+    // 关键：必须同时有 Range 头才 clamp。无 Range 请求（Safari <video> 初始探测）
+    // 直接透传为 200 全文件，否则 Safari 拿到 206/10MB 会因数据不完整卡住。
     // 注意：不能仅凭扩展名判断，否则下载请求（window.location.href 导航）也会被
     // 当作媒体处理，导致 Content-Disposition 不设、Range 被错误夹紧、下载变预览。
     const fileName = fileKey.split('/').pop() || '';
     const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
     const fileExt = (fileName.split('.').pop() || '').toLowerCase();
     const isMediaExt = mediaExtensions.includes(fileExt);
-    const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio'
-      || (rangeHeader && isMediaExt);
+    const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio' || isMediaExt)
+      && rangeHeader !== null;
 
-    // 浏览器原生 <video>/<audio> 请求全部走 Worker 代理：
-    // - 无 Range：请求前 10MB，返回 206
-    // - 大 Range（如 Safari 2.9GB 整文件请求）：夹紧到 10MB
-    // - 中小 Range：原样转发
-    // 一律不走 302，避免跨域直连 CDN 超大请求超时/断连
-    // 统一 10MB clamp，与管理页保持一致，匹配 SW 缓存上限
+    // 媒体请求 + 有 Range：夹紧超大 Range，避免单次 CDN 请求超过 10MB
+    // 无 Range 请求不 clamp，直接透传返回 200 全文件（Safari 初始探测需要完整响应）
     const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB
 
     const reqHeaders = new Headers(request.headers);
@@ -317,10 +313,8 @@ export async function onRequestGet(context: any) {
     reqHeaders.delete('referer');
 
     if (isMediaRequest) {
-      const parsed = rangeHeader ? parseByteRange(rangeHeader) : null;
-      if (!parsed) {
-        reqHeaders.set('Range', `bytes=0-${MEDIA_CLAMP - 1}`);
-      } else if (parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+      const parsed = parseByteRange(rangeHeader);
+      if (parsed && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
         const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
         reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
       }
