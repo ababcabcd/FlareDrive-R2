@@ -288,7 +288,18 @@ self.addEventListener('fetch', (event) => {
   // 经过 SW 反而多一跳 fetch，对图片等小文件拖慢明显。
   const rangeHeader = event.request.headers.get('Range');
   if (!rangeHeader) {
-    event.respondWith(fetch(event.request));
+    // Safari 视频元素初始探测请求不带 Range，SW 的 event.request 直接 fetch
+    // 可能导致响应不被视作合格媒体源，返回 MEDIA_ERR_SRC_NOT_SUPPORTED。
+    // 显式 fetch + withCors 包装确保浏览器收到完整 CORS 头 + 正确 Content-Type。
+    event.respondWith(
+      (async () => {
+        const rawResponse = await fetch(url.href, {
+          method: event.request.method,
+          headers: event.request.headers,
+        });
+        return withCors(rawResponse);
+      })()
+    );
     return;
   }
 

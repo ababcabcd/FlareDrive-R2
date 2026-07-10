@@ -203,11 +203,15 @@ export async function onRequestGet(context: any) {
   // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
   // 这里使用混合检测：Sec-Fetch-Dest 直接为 video/audio → 媒体；否则
   // 带 Range 且扩展名为视频/音频格式 → 也是媒体（SW 流式转发）。
-  // 不单纯凭扩展名判断，避免下载导航被误当媒体请求。
+  // Safari <video> 初始探测请求没有 Range，经 SW 转发后 secFetchDest 也为空。
+  // 此时若扩展名匹配媒体类型，视为 SW 转发的视频探测请求，不做整文件回源。
   const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
   const fileExt = ((path || '').split('.').pop() || '').toLowerCase();
+  const isMediaExt = mediaExtensions.includes(fileExt);
   const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio'
-    || (rangeHeader && mediaExtensions.includes(fileExt));
+    || (rangeHeader && isMediaExt)
+    // SW 转发丢失了 secFetchDest，且无 Range，但扩展名是媒体 → Safari 视频探测
+    || (!secFetchDest && !rangeHeader && isMediaExt);
   const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB 上限，避免浪费带宽
 
   const reqHeaders = new Headers(request.headers);
