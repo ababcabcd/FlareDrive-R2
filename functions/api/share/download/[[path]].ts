@@ -128,18 +128,6 @@ function encodeContentDisposition(fileName: string): string {
   return `attachment; filename="${fileName}"; filename*=UTF-8''${encoded}`;
 }
 
-// 解析单区间 Range 头：bytes=start-end 或 bytes=start-
-type ByteRange = { start: number; end: number };
-function parseByteRange(rangeHeader: string | null): ByteRange | null {
-  if (!rangeHeader) return null;
-  const match = rangeHeader.match(/^bytes=(\d+)-(\d+)?$/);
-  if (!match) return null;
-  const start = parseInt(match[1], 10);
-  const end = match[2] ? parseInt(match[2], 10) : Infinity;
-  if (isNaN(start) || start < 0 || end < start) return null;
-  return { start, end };
-}
-
 async function validateAndGetMetadata(bucket: any, token: string): Promise<{ metadata: ShareMetadata; errorResponse?: Response }> {
   const shareObject = await bucket.get(`${SHARES_PREFIX}${token}.json`);
   if (!shareObject) {
@@ -303,18 +291,10 @@ export async function onRequestGet(context: any) {
     const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio' || isMediaExt)
       && rangeHeader !== null;
 
-    // 媒体请求 + 有 Range：只夹紧“远离文件头”的超大 Range（即 seek 到 >=10MB 之后）。
-    // Safari/Chrome 初始加载时起始位置通常很小（0 或只有几千字节），必须返回完整数据
-    // 到文件末尾，否则拿不到 moov/duration，进度条会显示 --:-- 并卡死。
-    // 起始位置 >= 10MB 的 seek 才夹紧到 10MB chunk，避免单次 CDN 下载过大。
-    const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB
-    if (isMediaRequest) {
-      const parsed = parseByteRange(rangeHeader);
-      if (parsed && parsed.start >= MEDIA_CLAMP && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
-        const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
-        reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
-      }
-    }
+    // 媒体请求不再手动夹紧 Range，直接原样透传给 R2。
+    // Safari 对 moov-at-end 的视频需要自己控制请求范围来获取 metadata；任何
+    // 夹紧操作都可能导致响应不完整，进而丢失 moov/duration，进度条显示 --:--。
+    // 浏览器有完整的 MP4 解析逻辑，应信任其发出的 Range 请求。
 
     // 其他请求代理到 PUBURL，确保 CORS 头完整并设置正确的下载文件名
 
