@@ -493,6 +493,10 @@ export default {
     // 注册 Service Worker 用于视频/音频多线程预取加速
     this._swReadyPromise = Promise.resolve(false);
     if ('serviceWorker' in navigator) {
+      // 临时：管理页不注册 SW，直连 API 测试 Safari 兼容性
+      this._swReadyPromise = Promise.resolve(false);
+      return;
+
       this._swReadyPromise = new Promise((resolve) => {
         let resolved = false;
         const done = (ok) => { if (!resolved) { resolved = true; resolve(ok); } };
