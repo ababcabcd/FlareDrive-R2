@@ -207,9 +207,11 @@ async function fetchAndCache(request, event) {
         if (actualRange.total && !cachedHeaders.has('X-Total-Size')) {
           cachedHeaders.set('X-Total-Size', String(actualRange.total));
         }
+        // Cache API 不允许存储 206，改为 200；serveFromCache 会从 buffer 重新
+        // 构建 206，它只依赖缓存 key 里的 Range 和 X-Total-Size / Content-Range 头
         const cachedResponse = new Response(cloned.body, {
-          status: cloned.status,
-          statusText: cloned.statusText,
+          status: 200,
+          statusText: 'OK',
           headers: cachedHeaders,
         });
         event.waitUntil(
