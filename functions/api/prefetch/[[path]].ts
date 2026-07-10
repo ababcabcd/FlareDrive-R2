@@ -21,7 +21,7 @@ async function fetchWithEdgeCache(
   reqHeaders: Headers,
   ctx: any,
 ): Promise<Response> {
-  const cache = (caches as any)?.default as Cache | undefined;
+  const cache = typeof caches !== 'undefined' ? caches.default : undefined;
   const range = reqHeaders.get("Range") || "";
 
   if (cache) {
