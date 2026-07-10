@@ -292,8 +292,8 @@ export async function onRequestGet(context: any) {
     // 1. Sec-Fetch-Dest 直接是 video/audio → 一定是媒体请求
     // 2. 否则，如果请求带了 Range 且文件扩展名是视频/音频格式 → 也是媒体请求
     //    （SW 转发的流式 Range 请求，Sec-Fetch-Dest 已丢失但保留了 Range）
-    // 3. 没有 Range 也没有 secFetchDest，但扩展名是媒体格式 → Safari <video> 经 SW
-    //    转发的初始探测请求，同样 clamp 到 10MB 避免整文件回源。
+    // 注意：不带 Range 的初始探测请求不 clamp，返回完整 200 让浏览器自行判断。
+    // 如果 clamp 了初始探测为 206，浏览器会发超大 Range 补数据，再 clamp 会导致卡住。
     // 注意：不能仅凭扩展名判断，否则下载请求（window.location.href 导航）也会被
     // 当作媒体处理，导致 Content-Disposition 不设、Range 被错误夹紧、下载变预览。
     const fileName = fileKey.split('/').pop() || '';
@@ -301,8 +301,7 @@ export async function onRequestGet(context: any) {
     const fileExt = (fileName.split('.').pop() || '').toLowerCase();
     const isMediaExt = mediaExtensions.includes(fileExt);
     const isMediaRequest = secFetchDest === 'video' || secFetchDest === 'audio'
-      || (rangeHeader && isMediaExt)
-      || (!secFetchDest && !rangeHeader && isMediaExt);
+      || (rangeHeader && isMediaExt);
 
     // 浏览器原生 <video>/<audio> 请求全部走 Worker 代理：
     // - 无 Range：请求前 10MB，返回 206
