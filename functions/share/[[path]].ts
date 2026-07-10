@@ -220,6 +220,7 @@ export async function onRequestGet(context) {
   <script>
     var token = "${token}";
     var fileUrl = '/api/share/download/?token=' + token;
+    var prefetchUrl = '/api/share/prefetch/?token=' + token;
     var shareFileName = '';
 
     // 分享落地页独立打开时也可能没有 SW，主动注册以确保视频缓存生效
@@ -256,9 +257,9 @@ export async function onRequestGet(context) {
         for (var i = 0; i < fs.length; i += PA) {
           if (!_pf.active) return;
           var sl = fs.slice(i, i + PA);
-          // 直接请求同源 fileUrl，不经过 CDN 跨域（Safari CORS 兼容）
+          // 预取走 /api/share/prefetch/，绕过 SW 缓存查询开销，直达 Worker
           await Promise.allSettled(sl.map(function(ch) {
-            return fetch(fileUrl, { headers: { Range: 'bytes=' + ch.s + '-' + ch.e }, signal: _pf.ctrl.signal })
+            return fetch(prefetchUrl, { headers: { Range: 'bytes=' + ch.s + '-' + ch.e }, signal: _pf.ctrl.signal })
               .then(function(r) { if (r.ok) return r.arrayBuffer(); throw new Error(String(r.status)); });
           }));
         }
@@ -291,7 +292,7 @@ export async function onRequestGet(context) {
       _pf.ctrl = new AbortController();
       // HEAD 获取文件大小（兼容 Safari，不会触发 body.cancel() 报错）
       try {
-        var hr = await fetch(fileUrl, { method: 'HEAD', signal: _pf.ctrl.signal });
+        var hr = await fetch(prefetchUrl, { method: 'HEAD', signal: _pf.ctrl.signal });
         _pf.size = parseInt(hr.headers.get('Content-Length'), 10) || 0;
       } catch(e) { if (e.name !== 'AbortError') { _pfStop(); } return; }
       if (_pf.size <= 0) { _pfStop(); return; }
@@ -353,14 +354,12 @@ export async function onRequestGet(context) {
             '<button class="download-btn" onclick="downloadFile()">' +
               '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
             '</button>';
-          // 视频预取：等视频真正开始播放后再启动（playing 事件），
-          // 避免预取与浏览器初始 buffer 加载争抢同一 Range，拖慢首帧。
+          // 视频预取：只在用户主动点击视频后才启动（click once），
+          // autoplay 不应触发预取，避免浪费带宽和 R2 请求。
           if (isVideo(data.contentType)) {
             var v = app.querySelector('video');
             if (v) {
-              function start() { _pfStart(v); }
-              if (!v.paused) { start(); }
-              else { v.addEventListener('playing', start, { once: true }); }
+              v.addEventListener('click', function() { _pfStart(v); }, { once: true });
             }
           }
         } else {
