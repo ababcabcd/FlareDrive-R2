@@ -10,9 +10,9 @@
  * - 支持精确 Range 匹配和覆盖匹配（大段缓存可服务于子区间）
  */
 
-const VIDEO_CACHE = 'video-chunks-v4';
-const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 对齐单位
-const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk (~120MB)
+const VIDEO_CACHE = 'video-chunks-v5';
+const MAX_CACHE_SIZE = 10 * 1024 * 1024; // 单 chunk 最大缓存 10MB（对齐 Worker clamp 上限）
+const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk
 
 // ------------------------- Range 解析 -------------------------
 
@@ -87,7 +87,7 @@ async function serveFromCache(url, range) {
   let contentType = 'video/mp4';
   let totalSize = null;
 
-  // 1. 精确匹配：prefetch 写入的 chunk 与 video 请求的 Range 完全一致
+  // 1. 精确匹配：请求 Range 与缓存 key 完全一致
   const exactKey = `${url}|${range.start}-${range.end}`;
   const exactMatch = await cache.match(exactKey);
   if (exactMatch) {
@@ -97,63 +97,63 @@ async function serveFromCache(url, range) {
     return build206Response(buffer, range, contentType, totalSize);
   }
 
-  // 2. 覆盖匹配：已有更大的缓存 chunk，从中切出所需的子区间
+  // 2. 收集与请求区间有交集的缓存 chunk（不要求 2MB 对齐）
+  //    支持管理页 10MB chunk 和分享页 2MB chunk 混存
   const keys = await cache.keys();
+  const overlapping = [];
+
   for (const req of keys) {
     const keyUrl = req.url;
     if (!keyUrl.startsWith(url + '|')) continue;
     const cacheRange = extractRange(keyUrl);
     if (!cacheRange) continue;
-    if (cacheRange.start <= range.start && cacheRange.end >= range.end) {
-      const entry = await cache.match(req);
-      if (entry) {
-        contentType = entry.headers.get('Content-Type') || contentType;
-        totalSize = getTotalSize(entry) || totalSize;
-        const buffer = await entry.arrayBuffer();
-        const offset = range.start - cacheRange.start;
-        const length = range.end - range.start + 1;
-        return build206Response(buffer.slice(offset, offset + length), range, contentType, totalSize);
-      }
+    // 区间交集：两个区间 [a,b] 和 [c,d] 相交当且仅当 a<=d 且 c<=b
+    if (cacheRange.start <= range.end && cacheRange.end >= range.start) {
+      overlapping.push({ req, range: cacheRange });
     }
   }
 
-  // 3. 多 chunk 拼接：跨越多块已缓存数据，从各块中拼出完整区间
-  const firstChunk = Math.floor(range.start / CHUNK_SIZE);
-  const lastChunk = Math.floor(range.end / CHUNK_SIZE);
-  if (firstChunk !== lastChunk) {
-    // 收集所有需要的 chunk key
-    const neededKeys = [];
-    for (let i = firstChunk; i <= lastChunk; i++) {
-      const chunkStart = i * CHUNK_SIZE;
-      const chunkEnd = chunkStart + CHUNK_SIZE - 1;
-      neededKeys.push({ key: `${url}|${chunkStart}-${chunkEnd}`, start: chunkStart });
-    }
+  if (overlapping.length === 0) return null;
 
-    const chunkEntries = [];
-    for (const { key, start } of neededKeys) {
-      const entry = await cache.match(key);
-      if (!entry) { chunkEntries.length = 0; break; } // 缺失任一块则放弃拼接
-      const buffer = await entry.arrayBuffer();
-      contentType = entry.headers.get('Content-Type') || contentType;
-      totalSize = getTotalSize(entry) || totalSize;
-      chunkEntries.push({ buffer, start });
+  // 3. 排序并检查是否覆盖整个请求区间（无空洞）
+  overlapping.sort((a, b) => a.range.start - b.range.start);
+  let coverEnd = -1;
+  for (const ch of overlapping) {
+    if (coverEnd >= 0 && ch.range.start > coverEnd + 1) {
+      return null; // 有空洞，缓存不足以覆盖
     }
+    coverEnd = Math.max(coverEnd, ch.range.end);
+  }
+  if (overlapping[0].range.start > range.start || coverEnd < range.end) {
+    return null; // 缓存区间未能完全覆盖请求区间
+  }
 
-    if (chunkEntries.length === neededKeys.length) {
-      const totalLen = chunkEntries.reduce((s, c) => s + c.buffer.byteLength, 0);
-      const merged = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const c of chunkEntries) {
-        merged.set(new Uint8Array(c.buffer), offset);
-        offset += c.buffer.byteLength;
-      }
-      const sliceStart = range.start - firstChunk * CHUNK_SIZE;
-      const sliceEnd = sliceStart + (range.end - range.start);
-      return build206Response(merged.slice(sliceStart, sliceEnd + 1), range, contentType, totalSize);
+  // 4. 读取各 chunk 并拼接
+  const buffers = [];
+  for (const ch of overlapping) {
+    const entry = await cache.match(ch.req);
+    if (!entry) return null;
+    const buffer = await entry.arrayBuffer();
+    contentType = entry.headers.get('Content-Type') || contentType;
+    if (!totalSize) totalSize = getTotalSize(entry);
+    buffers.push({ buffer: new Uint8Array(buffer), range: ch.range });
+  }
+
+  // 5. 合并：各 chunk 中属于请求区间 [range.start, range.end] 的部分写入
+  const mergedLen = range.end - range.start + 1;
+  const merged = new Uint8Array(mergedLen);
+  for (const { buffer, range: cr } of buffers) {
+    const partStart = Math.max(cr.start, range.start);
+    const partEnd = Math.min(cr.end, range.end);
+    if (partStart <= partEnd) {
+      const srcOff = partStart - cr.start;
+      const dstOff = partStart - range.start;
+      const len = partEnd - partStart + 1;
+      merged.set(buffer.slice(srcOff, srcOff + len), dstOff);
     }
   }
 
-  return null; // 缓存未命中
+  return build206Response(merged.buffer, range, contentType, totalSize);
 }
 
 // ------------------------- CORS 安全响应包装 -------------------------
@@ -199,8 +199,8 @@ async function fetchAndCache(request, event) {
     const actualRange = parseContentRange(rawResponse.headers.get('Content-Range'));
     if (actualRange) {
       const actualSize = actualRange.end - actualRange.start + 1;
-      // 仅缓存 <= 2MB 的 chunk，避免 10MB 大 chunk 快速占满 Cache API 配额
-      if (actualSize <= CHUNK_SIZE) {
+      // 缓存不超过 MAX_CACHE_SIZE（10MB）的 chunk，覆盖管理页 10MB 和分享页 2MB
+      if (actualSize <= MAX_CACHE_SIZE) {
         const cloned = rawResponse.clone();
         // 把总大小持久化进缓存，避免 build206Response 丢失总大小
         const cachedHeaders = new Headers(cloned.headers);
