@@ -251,15 +251,12 @@ export async function onRequestGet(context: any) {
       || (rangeHeader && mediaExtensions.includes(fileExt));
 
     // 浏览器原生 <video>/<audio> 请求全部走 Worker 代理：
-    // - 无 Range：请求前 2MB/10MB，返回 206
-    // - 大 Range（如 Safari 2.9GB 整文件请求）：夹紧到 2MB/10MB
+    // - 无 Range：请求前 10MB，返回 206
+    // - 大 Range（如 Safari 2.9GB 整文件请求）：夹紧到 10MB
     // - 中小 Range：原样转发
     // 一律不走 302，避免跨域直连 CDN 超大请求超时/断连
-    // 小文件（<=100MB）用 2MB 夹紧，与 SW 缓存/prefetch 对齐；大文件用 10MB 减少请求数。
+    // 统一 10MB clamp，与管理页保持一致，匹配 SW 缓存上限
     const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB
-    const MEDIA_CLAMP_SMALL = 2 * 1024 * 1024; // 2MB
-    const MEDIA_CLAMP_THRESHOLD = 100 * 1024 * 1024; // 100MB
-    const clampSize = fileSize > MEDIA_CLAMP_THRESHOLD ? MEDIA_CLAMP : MEDIA_CLAMP_SMALL;
 
     const reqHeaders = new Headers(request.headers);
     reqHeaders.delete('host');
@@ -269,9 +266,9 @@ export async function onRequestGet(context: any) {
     if (isMediaRequest) {
       const parsed = rangeHeader ? parseByteRange(rangeHeader) : null;
       if (!parsed) {
-        reqHeaders.set('Range', `bytes=0-${clampSize - 1}`);
-      } else if (parsed.end - parsed.start + 1 > clampSize) {
-        const clampedEnd = parsed.start + clampSize - 1;
+        reqHeaders.set('Range', `bytes=0-${MEDIA_CLAMP - 1}`);
+      } else if (parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+        const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
         reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
       }
     }

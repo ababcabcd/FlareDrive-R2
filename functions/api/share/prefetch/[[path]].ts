@@ -92,7 +92,7 @@ async function validateShare(bucket: any, token: string): Promise<{ key: string 
   return { key: metadata.key };
 }
 
-const PREFETCH_CLAMP = 2 * 1024 * 1024; // 2MB
+const PREFETCH_CLAMP = 10 * 1024 * 1024; // 10MB
 
 // ------------------------- Route Handlers -------------------------
 

@@ -49,7 +49,7 @@ function getPubUrl(context: any): string {
   return new URL(filePath, context.env["PUBURL"]).href;
 }
 
-const PREFETCH_CLAMP = 2 * 1024 * 1024; // 2MB，与 App.vue 的 CHUNK_SIZE 对齐
+const PREFETCH_CLAMP = 10 * 1024 * 1024; // 10MB，与 SW 缓存上限对齐
 
 // ------------------------- Route Handlers -------------------------
 
