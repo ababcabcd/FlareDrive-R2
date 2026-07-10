@@ -287,14 +287,21 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     (async () => {
-      const range = parseRange(rangeHeader);
-      if (range) {
-        const cached = await serveFromCache(url.href, range);
-        if (cached) {
-          console.log(`[SW] cache HIT  ${range.start}-${range.end}`);
-          return cached;
+      // 预取请求（App.vue 的分段预加载）：这些请求的目标是未来 chunk，缓存命中率极低，
+      // 跳过 serveFromCache 的 IndexedDB 查询（精确匹配 + keys 遍历 + 多块拼接），
+      // 直接走网络，收益更大。SW 的 fetchAndCache 会自动将 206 响应写入缓存，
+      // 当浏览器后续真正需要这些 chunk 时仍能命中。
+      const isPrefetch = event.request.headers.has('X-Prefetch');
+      if (!isPrefetch) {
+        const range = parseRange(rangeHeader);
+        if (range) {
+          const cached = await serveFromCache(url.href, range);
+          if (cached) {
+            console.log(`[SW] cache HIT  ${range.start}-${range.end}`);
+            return cached;
+          }
+          console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
         }
-        console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
       }
       // 网络获取 + 异步缓存
       return fetchAndCache(event.request, event);

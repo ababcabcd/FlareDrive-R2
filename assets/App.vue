@@ -389,6 +389,7 @@
           <video v-else-if="playerSrc && playerType === 'video'" ref="videoPlayer" :src="playerSrc" controls autoplay
             preload="metadata" playsinline class="player-video"
             @error="onVideoError"
+            @click.once="onVideoUserInitiated"
             @loadedmetadata="_onVideoLoadedMetadata"
             @timeupdate="_onVideoTimeUpdate"
             @seeked="_onVideoSeeked"></video>
@@ -1105,19 +1106,8 @@ export default {
         this.playerType = type;
         this.videoRetryCount = 0;
         this.showPlayer = true;
-        // 预热浏览器缓存：等视频开始播放后再启动预取，避免与 <video> 的初始 Range 请求争抢带宽
-        if (this.playerType === 'video' && this.playerSrc.startsWith('/raw/')) {
-          this.$nextTick(() => {
-            const video = this.$refs.videoPlayer;
-            if (video) {
-              if (!video.paused) {
-                this._startVideoPrefetch();
-              } else {
-                video.addEventListener('playing', () => this._startVideoPrefetch(), { once: true });
-              }
-            }
-          });
-        }
+        // 预取改为用户点击视频后才启动（@click.once → onVideoUserInitiated），
+        // 避免 autoplay 自动开始预加载浪费带宽
       } else {
         window.open(filePath);
       }
@@ -1618,6 +1608,12 @@ export default {
 
     // ==================== 视频多线程预取 ====================
 
+    /** 用户点击视频（非 autoplay）后启动预取 */
+    onVideoUserInitiated() {
+      if (this._prefetchActive) return;
+      this._startVideoPrefetch();
+    },
+
     /** 启动预取：先 HEAD 取文件大小，等 loadedmetadata 后开始下载（调用方已等 playing 事件） */
     async _startVideoPrefetch() {
       if (this._prefetchActive) return;
@@ -1696,25 +1692,12 @@ export default {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
           const res = await fetch(url, {
-            headers: { ...authHeaders, Range: `bytes=${start}-${end}` },
+            headers: { ...authHeaders, Range: `bytes=${start}-${end}`, 'X-Prefetch': '1' },
             signal,
           });
           if (res.ok) {
-            const buf = await res.arrayBuffer();
-            // 写入 Cache API，SW 可复用同一 chunk 响应 seek-back 请求
-            try {
-              const cache = await caches.open('video-chunks-v2');
-              const key = `${url}|${start}-${end}`;
-              cache.put(key, new Response(buf, {
-                status: 206,
-                headers: {
-                  'Content-Type': res.headers.get('Content-Type') || 'video/mp4',
-                  'Content-Range': `bytes ${start}-${end}/*`,
-                  'Content-Length': String(buf.byteLength),
-                },
-              })).catch(() => {});
-            } catch (_) { /* Cache API 可能不可用，静默忽略 */ }
-            return buf;
+            // SW 的 fetchAndCache 已将 206 响应写入 video-chunks-v4，无需手动重复写入
+            return await res.arrayBuffer();
           }
           // 4xx 不重试（客户端错误），5xx 重试
           if (res.status < 500) throw new Error(`${res.status}`);
