@@ -1610,8 +1610,8 @@ export default {
 
     /** 用户点击视频（非 autoplay）后启动预取 */
     onVideoUserInitiated() {
-      if (this._prefetchActive) return;
-      this._startVideoPrefetch();
+      // 临时关闭预取，直连 API 测试 Safari 兼容性
+      return;
     },
 
     /** 启动预取：先 HEAD 取文件大小，等 loadedmetadata 后开始下载（调用方已等 playing 事件） */
