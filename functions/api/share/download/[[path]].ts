@@ -128,15 +128,15 @@ function encodeContentDisposition(fileName: string): string {
   return `attachment; filename="${fileName}"; filename*=UTF-8''${encoded}`;
 }
 
-// 解析单区间 Range 头：bytes=start-end
+// 解析单区间 Range 头：bytes=start-end 或 bytes=start-
 type ByteRange = { start: number; end: number };
 function parseByteRange(rangeHeader: string | null): ByteRange | null {
   if (!rangeHeader) return null;
-  const match = rangeHeader.match(/^bytes=(\d+)-(\d+)$/);
+  const match = rangeHeader.match(/^bytes=(\d+)-(\d+)?$/);
   if (!match) return null;
   const start = parseInt(match[1], 10);
-  const end = parseInt(match[2], 10);
-  if (isNaN(start) || isNaN(end) || start < 0 || end < start) return null;
+  const end = match[2] ? parseInt(match[2], 10) : Infinity;
+  if (isNaN(start) || start < 0 || end < start) return null;
   return { start, end };
 }
 
@@ -303,18 +303,14 @@ export async function onRequestGet(context: any) {
     const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio' || isMediaExt)
       && rangeHeader !== null;
 
-    // 媒体请求 + 有 Range：夹紧超大 Range，避免单次 CDN 请求超过 10MB
-    // 无 Range 请求不 clamp，直接透传返回 200 全文件（Safari 初始探测需要完整响应）
+    // 媒体请求 + 有 Range：只夹紧从非零位置开始的超大 Range。
+    // Safari 初始请求通常是 bytes=0-...（含无界 bytes=0-），必须返回完整数据到
+    // 文件末尾；若夹紧到 10MB，Safari 会因响应不完整而卡死或报 MEDIA_ERR。
+    // 非零 seek（如 bytes=65536-...）夹紧到 10MB，避免单次 CDN 下载过大。
     const MEDIA_CLAMP = 10 * 1024 * 1024; // 10MB
-
-    const reqHeaders = new Headers(request.headers);
-    reqHeaders.delete('host');
-    reqHeaders.delete('origin');
-    reqHeaders.delete('referer');
-
     if (isMediaRequest) {
       const parsed = parseByteRange(rangeHeader);
-      if (parsed && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
+      if (parsed && parsed.start > 0 && parsed.end - parsed.start + 1 > MEDIA_CLAMP) {
         const clampedEnd = parsed.start + MEDIA_CLAMP - 1;
         reqHeaders.set('Range', `bytes=${parsed.start}-${clampedEnd}`);
       }
