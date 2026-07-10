@@ -1655,12 +1655,53 @@ export default {
       this._prefetchMetadataHandled = true;
       const video = e.target;
 
-      // 从当前播放位置之后开始，跳过头一个 chunk，避免和播放器抢首包
-      const currentByte = this._estimateCurrentByte(video);
-      const CHUNK_SIZE = 2 * 1024 * 1024;
-      const startByte = Math.min(this._prefetchFileSize, Math.max(0, currentByte + CHUNK_SIZE));
-      console.log('[Prefetch] loadedmetadata, start from byte', startByte);
-      this._prefetchBatch(startByte);
+      // 不预取 byte 0：<video> 的首个 Range 请求已被 Worker 钳位到 0–10MB，
+      // 预取从 10MB 之后开始，专注预热后续 chunk，避免和 <video> 首包竞争。
+      const MEDIA_CLAMP = 10 * 1024 * 1024;
+      const startByte = Math.min(this._prefetchFileSize, MEDIA_CLAMP);
+      const BUFFER_THRESHOLD = 5 * 1024 * 1024; // 缓冲到 5MB（钳位的一半）再启动
+      const MAX_WAIT = 8000; // 最多等 8 秒，兜底防止 progress 永远不触发
+
+      // 已缓冲够 → 直接启动
+      if (video.buffered.length > 0 && video.buffered.end(0) >= BUFFER_THRESHOLD) {
+        console.log('[Prefetch] buffer already >= 5MB, start from byte', startByte);
+        this._prefetchBatch(startByte);
+        return;
+      }
+
+      console.log('[Prefetch] waiting for buffer >= 5MB before prefetch...');
+      let started = false;
+
+      this._prefetchBufHandler = () => {
+        if (started || !this._prefetchActive) return;
+        if (video.buffered.length > 0 && video.buffered.end(0) >= BUFFER_THRESHOLD) {
+          started = true;
+          this._cleanupPrefetchBufferWait(video);
+          console.log('[Prefetch] buffer reached, start from byte', startByte);
+          this._prefetchBatch(startByte);
+        }
+      };
+
+      this._prefetchBufTimer = setTimeout(() => {
+        if (started || !this._prefetchActive) return;
+        started = true;
+        this._cleanupPrefetchBufferWait(video);
+        console.log('[Prefetch] timeout, force start from byte', startByte);
+        this._prefetchBatch(startByte);
+      }, MAX_WAIT);
+
+      video.addEventListener('progress', this._prefetchBufHandler);
+    },
+
+    _cleanupPrefetchBufferWait(video) {
+      if (this._prefetchBufHandler) {
+        video.removeEventListener('progress', this._prefetchBufHandler);
+        this._prefetchBufHandler = null;
+      }
+      if (this._prefetchBufTimer) {
+        clearTimeout(this._prefetchBufTimer);
+        this._prefetchBufTimer = null;
+      }
     },
 
     _stopVideoPrefetch() {
@@ -1670,6 +1711,10 @@ export default {
       this._prefetchMetadataHandled = false;
       if (this._prefetchSeekTimer) { clearTimeout(this._prefetchSeekTimer); this._prefetchSeekTimer = null; }
       if (this._prefetchCtrl) { this._prefetchCtrl.abort(); this._prefetchCtrl = null; }
+      if (this._prefetchBufHandler || this._prefetchBufTimer) {
+        const video = this.$refs.videoPlayer;
+        if (video) this._cleanupPrefetchBufferWait(video);
+      }
       console.log('[Prefetch] stopped');
     },
 
@@ -1714,49 +1759,28 @@ export default {
       if (this._prefetchBatchRunning) return;
       this._prefetchBatchRunning = true;
       const CHUNK_SIZE = 2 * 1024 * 1024;
-      const BATCH_SIZE = 3;
-      const PARALLEL = 1;
-      const MAX_PREFETCH_AHEAD = 10 * 1024 * 1024; // 最多预取当前位置后 10MB，避免无限下载
-      const ctrl = this._prefetchCtrl; // 捕获当前 controller，seek 替换后检测退出
+      const MAX_PREFETCH_AHEAD = 10 * 1024 * 1024;
+      const ctrl = this._prefetchCtrl;
       const url = this._prefetchUrl;
       const fileSize = this._prefetchFileSize;
-      let byte = fromByte;
 
-      while (this._prefetchActive && this._prefetchCtrl === ctrl) {
-        // 动态上限：当前播放位置 + MAX_PREFETCH_AHEAD，但不超过文件末尾
-        const cap = Math.min(fileSize, (this._prefetchCurrentByte || 0) + MAX_PREFETCH_AHEAD);
-        if (byte >= cap) break;
+      // 单段预取：每次只下载一个 chunk，不做 while 批量循环。
+      // 下一段由 _onVideoTimeUpdate 在播放到当前段末尾附近时触发。
+      const cap = Math.min(fileSize, (this._prefetchCurrentByte || 0) + MAX_PREFETCH_AHEAD);
+      if (fromByte >= cap) { this._prefetchBatchRunning = false; return; }
 
-        const toFetch = [];
-        let end = byte, count = 0;
-        while (count < BATCH_SIZE && end < cap) {
-          const chunkEnd = Math.min(end + CHUNK_SIZE - 1, cap - 1);
-          toFetch.push({ start: end, end: chunkEnd });
-          count++; end = chunkEnd + 1;
-        }
-        if (toFetch.length === 0) break;
+      const start = fromByte;
+      const end = Math.min(start + CHUNK_SIZE - 1, cap - 1);
+      this._prefetchEndByte = end + 1;
 
-        // 乐观更新：批次开始就标记预期结束位置，避免 timeupdate 重复触发
-        this._prefetchEndByte = end;
-        console.log(`[Prefetch] batch bytes ${toFetch[0].start}-${toFetch[toFetch.length - 1].end} (cap: ${(cap / 1024 / 1024).toFixed(0)}MB)`);
-        const results = [];
-        for (let i = 0; i < toFetch.length; i += PARALLEL) {
-          if (!this._prefetchActive || this._prefetchCtrl !== ctrl) return;
-          const slice = toFetch.slice(i, i + PARALLEL);
-          const batchResults = await Promise.allSettled(
-            slice.map(({ start, end }) =>
-              this._fetchChunkWithRetry(url, start, end, ctrl.signal)
-            )
-          );
-          if (this._prefetchCtrl !== ctrl) return; // controller 被替换，退出
-          results.push(...batchResults);
-        }
-
-        const ok = results.filter(r => r.status === 'fulfilled').length;
-        const totalBytes = toFetch.reduce((s, c) => s + (c.end - c.start + 1), 0);
-        console.log(`[Prefetch] done: ${ok}/${toFetch.length} chunks, ${(totalBytes / 1024 / 1024).toFixed(1)}MB`);
-        byte = end;
+      try {
+        console.log(`[Prefetch] chunk bytes ${start}-${end} (cap: ${(cap / 1024 / 1024).toFixed(0)}MB)`);
+        await this._fetchChunkWithRetry(url, start, end, ctrl.signal);
+        console.log(`[Prefetch] done: 1 chunk, ${((end - start + 1) / 1024 / 1024).toFixed(1)}MB`);
+      } catch (err) {
+        if (err.name !== 'AbortError') console.warn('[Prefetch] chunk failed:', err.message);
       }
+
       this._prefetchBatchRunning = false;
     },
 
@@ -1765,11 +1789,11 @@ export default {
       const currentByte = this._estimateCurrentByte(e.target);
       this._prefetchCurrentByte = currentByte;
       const MAX_PREFETCH_AHEAD = 10 * 1024 * 1024;
+      const CHUNK_SIZE = 2 * 1024 * 1024;
       const cap = Math.min(this._prefetchFileSize, currentByte + MAX_PREFETCH_AHEAD);
-      const margin = 15 * 1024 * 1024;
-      // 已预取到上限或文件末尾，无需继续
-      if (this._prefetchEndByte >= cap) return;
-      if (currentByte + margin >= this._prefetchEndByte) {
+      if (!this._prefetchEndByte || this._prefetchEndByte >= cap) return;
+      // 播放到距当前预取末尾半 chunk 以内时，触发下个 chunk
+      if (currentByte >= this._prefetchEndByte - CHUNK_SIZE / 2) {
         console.log('[Prefetch] timeupdate trigger from byte', currentByte);
         this._prefetchBatch(this._prefetchEndByte);
       }

@@ -202,13 +202,18 @@ async function fetchAndCache(request, event) {
       // 缓存不超过 MAX_CACHE_SIZE（10MB）的 chunk，覆盖管理页 10MB 和分享页 2MB
       if (actualSize <= MAX_CACHE_SIZE) {
         const cloned = rawResponse.clone();
-        // 把总大小持久化进缓存，避免 build206Response 丢失总大小
-        const cachedHeaders = new Headers(cloned.headers);
-        if (actualRange.total && !cachedHeaders.has('X-Total-Size')) {
+        // 仅保留 serveFromCache 重建 206 所需的最小头集合：
+        // Content-Type → 构建 206 时设置
+        // X-Total-Size → 文件总大小
+        // Range 信息已在缓存 key URL（|start-end）中，无需额外存储。
+        const cachedHeaders = new Headers();
+        const ct = cloned.headers.get('Content-Type');
+        if (ct) cachedHeaders.set('Content-Type', ct);
+        if (actualRange.total) {
           cachedHeaders.set('X-Total-Size', String(actualRange.total));
         }
-        // Cache API 不允许存储 206，改为 200；serveFromCache 会从 buffer 重新
-        // 构建 206，它只依赖缓存 key 里的 Range 和 X-Total-Size / Content-Range 头
+        // Cache API 不允许存储 206，改为 200；
+        // serveFromCache 会从 buffer + key URL + X-Total-Size 重建 206
         const cachedResponse = new Response(cloned.body, {
           status: 200,
           statusText: 'OK',

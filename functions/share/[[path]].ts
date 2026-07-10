@@ -236,7 +236,7 @@ export async function onRequestGet(context) {
     function isMedia(type) { return isImage(type) || isVideo(type) || isAudio(type); }
 
     // ===== 视频多线程预取（同源 fileUrl，兼容 Safari CORS 限制）=====
-    var _pf = { active: false, running: false, ctrl: null, size: 0, endByte: 0 };
+    var _pf = { active: false, running: false, ctrl: null, size: 0, endByte: 0, vid: null, _bufTimer: null, _bufHandler: null };
 
     function _pfByte(vid) {
       var d = vid.duration;
@@ -247,31 +247,38 @@ export async function onRequestGet(context) {
     async function _pfGo(from) {
       if (_pf.running) return;
       _pf.running = true;
-      var CH = 2 * 1024 * 1024, BA = 3, PA = 1;
-      var b = from;
-      while (b < _pf.size && _pf.active) {
-        var fs = [], e = b, n = 0;
-        while (n < BA && e < _pf.size) { var ce = Math.min(e + CH - 1, _pf.size - 1); fs.push({ s: e, e: ce }); n++; e = ce + 1; }
-        _pf.endByte = e;
-        console.log('[Prefetch] batch bytes', fs[0].s + '-' + fs[fs.length - 1].e);
-        for (var i = 0; i < fs.length; i += PA) {
-          if (!_pf.active) return;
-          var sl = fs.slice(i, i + PA);
-          // 预取走 /api/share/prefetch/，绕过 SW 缓存查询开销，直达 Worker
-          await Promise.allSettled(sl.map(function(ch) {
-            return fetch(prefetchUrl, { headers: { Range: 'bytes=' + ch.s + '-' + ch.e }, signal: _pf.ctrl.signal })
-              .then(function(r) { if (r.ok) return r.arrayBuffer(); throw new Error(String(r.status)); });
-          }));
-        }
-        b = e;
+      var CH = 2 * 1024 * 1024;
+
+      // 单段预取：每次只下载一个 chunk，不做 while 批量循环。
+      // 下一段由 _pfOnTime 在播放到当前段末尾附近时触发。
+      if (from >= _pf.size || !_pf.active) { _pf.running = false; return; }
+
+      var start = from;
+      var end = Math.min(start + CH - 1, _pf.size - 1);
+      _pf.endByte = end + 1;
+
+      try {
+        console.log('[Prefetch] chunk bytes ' + start + '-' + end);
+        await fetch(prefetchUrl, { headers: { Range: 'bytes=' + start + '-' + end }, signal: _pf.ctrl.signal })
+          .then(function(r) { if (r.ok) return r.arrayBuffer(); throw new Error(String(r.status)); });
+        console.log('[Prefetch] done: 1 chunk, ' + ((end - start + 1) / 1024 / 1024).toFixed(1) + 'MB');
+      } catch(e) {
+        if (e.name !== 'AbortError') console.warn('[Prefetch] chunk failed:', e.message);
       }
+
       _pf.running = false;
     }
 
     function _pfOnTime(e) {
       if (!_pf.active || _pf.running) return;
-      var b = _pfByte(e.target), m = 15 * 1024 * 1024;
-      if (b + m >= _pf.endByte && _pf.endByte < _pf.size) _pfGo(_pf.endByte);
+      var b = _pfByte(e.target);
+      var CH = 2 * 1024 * 1024;
+      if (_pf.endByte >= _pf.size) return;
+      // 播放到距当前预取末尾半 chunk 以内时，触发下个 chunk
+      if (b >= _pf.endByte - CH / 2) {
+        console.log('[Prefetch] timeupdate trigger from byte', b);
+        _pfGo(_pf.endByte);
+      }
     }
 
     function _pfOnSeek(e) {
@@ -289,6 +296,7 @@ export async function onRequestGet(context) {
     async function _pfStart(vid) {
       if (_pf.active) return;
       _pf.active = true;
+      _pf.vid = vid;
       _pf.ctrl = new AbortController();
       // HEAD 获取文件大小（兼容 Safari，不会触发 body.cancel() 报错）
       try {
@@ -299,12 +307,55 @@ export async function onRequestGet(context) {
       console.log('[Prefetch] start, size=', (_pf.size / 1024 / 1024).toFixed(1) + 'MB');
       vid.addEventListener('timeupdate', _pfOnTime);
       vid.addEventListener('seeked', _pfOnSeek);
-      _pfGo(0);
+
+      var MEDIA_CLAMP = 10 * 1024 * 1024; // 与 Worker api/share/download/[[path]].ts 保持一致
+      var startByte = Math.min(_pf.size, MEDIA_CLAMP);
+      var BUFFER_THRESHOLD = 5 * 1024 * 1024; // 缓冲到 5MB（钳位的一半）再启动
+      var MAX_WAIT = 8000; // 最多等 8 秒
+
+      // 已缓冲够 → 直接启动
+      if (vid.buffered.length > 0 && vid.buffered.end(0) >= BUFFER_THRESHOLD) {
+        console.log('[Prefetch] buffer already >= 5MB, start from byte', startByte);
+        _pfGo(startByte);
+        return;
+      }
+
+      console.log('[Prefetch] waiting for buffer >= 5MB before starting...');
+      var started = false;
+
+      _pf._bufHandler = function() {
+        if (started || !_pf.active) return;
+        if (vid.buffered.length > 0 && vid.buffered.end(0) >= BUFFER_THRESHOLD) {
+          started = true;
+          vid.removeEventListener('progress', _pf._bufHandler);
+          _pf._bufHandler = null;
+          if (_pf._bufTimer) { clearTimeout(_pf._bufTimer); _pf._bufTimer = null; }
+          console.log('[Prefetch] buffer reached, start from byte', startByte);
+          _pfGo(startByte);
+        }
+      };
+
+      _pf._bufTimer = setTimeout(function() {
+        if (started || !_pf.active) return;
+        started = true;
+        vid.removeEventListener('progress', _pf._bufHandler);
+        _pf._bufHandler = null;
+        console.log('[Prefetch] timeout, force start from byte', startByte);
+        _pfGo(startByte);
+      }, MAX_WAIT);
+
+      vid.addEventListener('progress', _pf._bufHandler);
     }
 
     function _pfStop() {
       _pf.active = false; _pf.running = false;
       if (_pf.ctrl) { _pf.ctrl.abort(); _pf.ctrl = null; }
+      if (_pf._bufTimer) { clearTimeout(_pf._bufTimer); _pf._bufTimer = null; }
+      if (_pf._bufHandler && _pf.vid) {
+        _pf.vid.removeEventListener('progress', _pf._bufHandler);
+        _pf._bufHandler = null;
+      }
+      _pf.vid = null;
     }
     // ===== 预取结束 =====
     
