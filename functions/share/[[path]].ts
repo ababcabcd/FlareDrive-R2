@@ -220,7 +220,9 @@ export async function onRequestGet(context) {
   <script>
     var token = "${token}";
     var fileUrl = '/api/share/download/?token=' + token;
-    var prefetchUrl = '/api/share/prefetch/?token=' + token;
+    // 使用与 <video> 相同的 URL，SW 才会拦截并写入缓存。
+    // X-Prefetch 头告知 SW 跳过 serveFromCache 查询但保留 fetchAndCache 写入。
+    var prefetchUrl = fileUrl;
     var shareFileName = '';
 
     // 分享落地页独立打开时也可能没有 SW，主动注册以确保视频缓存生效
@@ -259,7 +261,7 @@ export async function onRequestGet(context) {
 
       try {
         console.log('[Prefetch] chunk bytes ' + start + '-' + end);
-        await fetch(prefetchUrl, { headers: { Range: 'bytes=' + start + '-' + end }, signal: _pf.ctrl.signal })
+        await fetch(prefetchUrl, { headers: { 'X-Prefetch': '1', Range: 'bytes=' + start + '-' + end }, signal: _pf.ctrl.signal })
           .then(function(r) { if (r.ok) return r.arrayBuffer(); throw new Error(String(r.status)); });
         console.log('[Prefetch] done: 1 chunk, ' + ((end - start + 1) / 1024 / 1024).toFixed(1) + 'MB');
       } catch(e) {

@@ -1621,7 +1621,9 @@ export default {
       if (!videoUrl.startsWith('/raw/')) return;
 
       this._prefetchActive = true;
-      this._prefetchUrl = videoUrl.replace('/raw/', '/api/prefetch/');
+      // 使用与 <video> 相同的 URL，SW 才会拦截并写入缓存。
+      // X-Prefetch 头告知 SW 跳过 serveFromCache 查询但保留 fetchAndCache 写入。
+      this._prefetchUrl = videoUrl;
       this._prefetchEndByte = 0;
       this._prefetchCurrentByte = 0;
       this._prefetchMetadataHandled = false;
@@ -1737,7 +1739,7 @@ export default {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
           const res = await fetch(url, {
-            headers: { ...authHeaders, Range: `bytes=${start}-${end}` },
+            headers: { ...authHeaders, 'X-Prefetch': '1', Range: `bytes=${start}-${end}` },
             signal,
           });
           if (res.ok) {
