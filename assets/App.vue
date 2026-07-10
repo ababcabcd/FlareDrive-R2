@@ -1621,7 +1621,7 @@ export default {
       if (!videoUrl.startsWith('/raw/')) return;
 
       this._prefetchActive = true;
-      this._prefetchUrl = videoUrl;
+      this._prefetchUrl = videoUrl.replace('/raw/', '/api/prefetch/');
       this._prefetchEndByte = 0;
       this._prefetchCurrentByte = 0;
       this._prefetchMetadataHandled = false;
@@ -1692,7 +1692,7 @@ export default {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
           const res = await fetch(url, {
-            headers: { ...authHeaders, Range: `bytes=${start}-${end}`, 'X-Prefetch': '1' },
+            headers: { ...authHeaders, Range: `bytes=${start}-${end}` },
             signal,
           });
           if (res.ok) {
