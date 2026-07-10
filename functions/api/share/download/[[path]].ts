@@ -296,6 +296,11 @@ export async function onRequestGet(context: any) {
     // 夹紧操作都可能导致响应不完整，进而丢失 moov/duration，进度条显示 --:--。
     // 浏览器有完整的 MP4 解析逻辑，应信任其发出的 Range 请求。
 
+    const reqHeaders = new Headers(request.headers);
+    reqHeaders.delete('host');
+    reqHeaders.delete('origin');
+    reqHeaders.delete('referer');
+
     // 其他请求代理到 PUBURL，确保 CORS 头完整并设置正确的下载文件名
 
     const response = await fetchWithEdgeCache(pubUrl, reqHeaders, context);
