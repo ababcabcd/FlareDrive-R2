@@ -282,24 +282,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 仅拦截带 Range 头的请求（视频/音频流式播放 + 预取），其余请求（图片加载、
-  // 文件下载导航、整文件请求等）直接透传，避免 SW 中间跳增加不必要的延迟。
-  // Range 是 SW 缓存命中判断的必要条件：无 Range 的请求返回 200，不会被缓存，
-  // 经过 SW 反而多一跳 fetch，对图片等小文件拖慢明显。
+  // 仅拦截带 Range 头的请求（视频/音频流式播放 + 预取），其余请求直接透传。
+  // 无 Range 请求（图片、下载导航、Safari 初始探测等）不做任何包装，Worker 端
+  // 已返回完整 CORS 头 + 正确 Content-Type（fixContentType），SW 中间跳反而
+  // 可能引入 opaque response / body null 等问题，引发 MEDIA_ERR_SRC_NOT_SUPPORTED。
   const rangeHeader = event.request.headers.get('Range');
   if (!rangeHeader) {
-    // Safari 视频元素初始探测请求不带 Range，SW 的 event.request 直接 fetch
-    // 可能导致响应不被视作合格媒体源，返回 MEDIA_ERR_SRC_NOT_SUPPORTED。
-    // 显式 fetch + withCors 包装确保浏览器收到完整 CORS 头 + 正确 Content-Type。
-    event.respondWith(
-      (async () => {
-        const rawResponse = await fetch(url.href, {
-          method: event.request.method,
-          headers: event.request.headers,
-        });
-        return withCors(rawResponse);
-      })()
-    );
+    event.respondWith(fetch(event.request));
     return;
   }
 
