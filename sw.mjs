@@ -325,8 +325,11 @@ self.addEventListener('fetch', (event) => {
   // 只拦截视频/下载端点
   if (!url.pathname.startsWith('/raw/') && !url.pathname.startsWith('/api/share/download/')) {
     // 非目标路径：也必须调用 respondWith，否则 Safari 会因注册了 fetch 监听器
-    // 而不自动 fallback 到网络，导致页面请求挂起
-    event.respondWith(fetch(event.request));
+    // 而不自动 fallback 到网络，导致页面请求挂起。
+    // 导航请求（mode=navigate）不能直接用 fetch(event.request)，浏览器不允许 SW
+    // 对同一个导航请求再发起导航。改用普通 GET 请求并优先使用 navigation preload。
+    const p = event.preloadResponse || fetch(event.request.url, { method: 'GET' });
+    event.respondWith(p);
     return;
   }
 
