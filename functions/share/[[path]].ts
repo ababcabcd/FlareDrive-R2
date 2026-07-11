@@ -249,7 +249,7 @@ export async function onRequestGet(context) {
     
     function resolveContentType(name, contentType) {
       var ct = (contentType || '').toLowerCase();
-      if (ct && ct !== 'application/octet-stream' && !ct.startsWith('binary/')) return ct;
+      if (ct && ct !== 'application/octet-stream' && ct !== 'application/x-www-form-urlencoded' && !ct.startsWith('binary/')) return ct;
       var ext = (name.split('.').pop() || '').toLowerCase();
       var map = {
         mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',

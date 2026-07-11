@@ -16,9 +16,9 @@ const EXT_TO_MIME: Record<string, string> = {
 
 function resolveContentType(name: string, contentType?: string): string {
   // 只在 R2 返回了错误/缺失的 MIME 类型时才用扩展名兜底
-  // 与 raw/[[path]].ts 的 fixContentType 保持一致：处理 octet-stream、binary/ 前缀、空值
+  // 与 raw/[[path]].ts 的 fixContentType 保持一致：处理 octet-stream、binary/ 前缀、空值、以及 axios 默认的 x-www-form-urlencoded
   const ct = (contentType || '').toLowerCase();
-  if (ct && ct !== 'application/octet-stream' && !ct.startsWith('binary/')) {
+  if (ct && ct !== 'application/octet-stream' && ct !== 'application/x-www-form-urlencoded' && !ct.startsWith('binary/')) {
     return ct;
   }
   const ext = (name.split('.').pop() || '').toLowerCase();

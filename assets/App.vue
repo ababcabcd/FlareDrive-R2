@@ -1271,7 +1271,9 @@ export default {
         this.uploadProgressLabel = `服务器接收处理中，${uploadFile.name} ...`;
         this.uploadProgress = 0;
         const uploadUrl = `/api/write/items/_fd_?name=${encodeURIComponent(basedir + uploadFile.name)}`;
-        const headers = {};
+        const headers = {
+          "Content-Type": uploadFile.type || "application/octet-stream",
+        };
 
         simulateTimer = setInterval(() => {
           // 仅在真实进度长时间停滞（>3s，真正卡住/等待服务器确认）时才温和推进 1%，

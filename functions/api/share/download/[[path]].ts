@@ -98,7 +98,7 @@ const EXT_TO_MIME: Record<string, string> = {
 };
 
 function resolveContentType(name: string, contentType?: string): string {
-  if (contentType && contentType !== 'application/octet-stream') {
+  if (contentType && contentType !== 'application/octet-stream' && contentType !== 'application/x-www-form-urlencoded') {
     return contentType;
   }
   const ext = (name.split('.').pop() || '').toLowerCase();

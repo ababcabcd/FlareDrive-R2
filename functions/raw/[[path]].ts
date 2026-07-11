@@ -77,8 +77,8 @@ const MIME_FALLBACK: Record<string, string> = {
 function fixContentType(headers: Headers, path: string | undefined): void {
   if (!path) return;
   const ct = headers.get("Content-Type") || "";
-  // 只在 R2 返回了错误/缺失的 MIME 类型时才修正
-  if (ct === "application/octet-stream" || !ct || ct.startsWith("binary/")) {
+  // 只在 R2 返回了错误/缺失的 MIME 类型时才修正（包括 axios 默认的 x-www-form-urlencoded）
+  if (ct === "application/octet-stream" || ct === "application/x-www-form-urlencoded" || !ct || ct.startsWith("binary/")) {
     const ext = (path.split(".").pop() || "").toLowerCase();
     if (MIME_FALLBACK[ext]) {
       headers.set("Content-Type", MIME_FALLBACK[ext]);

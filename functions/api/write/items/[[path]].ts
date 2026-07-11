@@ -1,6 +1,25 @@
 import { notFound, parseBucketPath } from "@/utils/bucket";
 import {get_auth_status} from "@/utils/auth";
 
+const MIME_BY_EXT: Record<string, string> = {
+  mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime",
+  webm: "video/webm", ogv: "video/ogg", ogg: "video/ogg",
+  mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac",
+  aac: "audio/aac", m4a: "audio/mp4", oga: "audio/ogg",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  gif: "image/gif", webp: "image/webp", bmp: "image/bmp",
+  svg: "image/svg+xml", avif: "image/avif", pdf: "application/pdf",
+};
+
+function resolveContentType(path: string, contentType?: string | null): string {
+  const ct = (contentType || "").toLowerCase();
+  if (ct && ct !== "application/octet-stream" && ct !== "application/x-www-form-urlencoded" && !ct.startsWith("binary/")) {
+    return ct;
+  }
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  return MIME_BY_EXT[ext] || ct || "application/octet-stream";
+}
+
 export async function onRequestPostCreateMultipart(context) {
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
@@ -13,7 +32,7 @@ export async function onRequestPostCreateMultipart(context) {
 
   const multipartUpload = await bucket.createMultipartUpload(path, {
     httpMetadata: {
-      contentType: request.headers.get("content-type"),
+      contentType: resolveContentType(path, request.headers.get("content-type")),
     },
     customMetadata,
   });
@@ -126,7 +145,7 @@ export async function onRequestPut(context) {
 
   const obj = await bucket.put(path, content, {
     httpMetadata: {
-      contentType: request.headers.get("content-type"),
+      contentType: resolveContentType(path, request.headers.get("content-type")),
     },
     customMetadata,
   });
