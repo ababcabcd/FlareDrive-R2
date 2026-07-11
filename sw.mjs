@@ -274,8 +274,8 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 只拦截分享页视频端点（管理页 /raw/ 直连测试用）
-  if (!url.pathname.startsWith('/api/share/download/')) {
+  // 只拦截视频/下载端点
+  if (!url.pathname.startsWith('/raw/') && !url.pathname.startsWith('/api/share/download/')) {
     // 非目标路径：也必须调用 respondWith，否则 Safari 会因注册了 fetch 监听器
     // 而不自动 fallback 到网络，导致页面请求挂起
     event.respondWith(fetch(event.request));
