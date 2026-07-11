@@ -141,8 +141,14 @@ export async function onRequestHead(context: any) {
   const authError = checkAuth(context);
   if (authError) return authError;
 
-  const [bucket, path] = parseBucketPath(context);
+  const [bucket, urlPath] = parseBucketPath(context);
   const url = getPubUrl(context);
+
+  // 当使用 /_fd_?name= 占位 URL 时，urlPath 永远是 _fd_，无法用于扩展名匹配。
+  // 必须从 name 参数中提取真实文件路径。
+  const requestUrl = new URL(context.request.url);
+  const nameParam = requestUrl.searchParams.get("name");
+  const effectivePath = nameParam !== null ? nameParam : (urlPath || '');
 
   const response = await fetch(new Request(url, {
     method: "HEAD",
@@ -155,14 +161,14 @@ export async function onRequestHead(context: any) {
   corsHeaders.forEach((v, k) => headers.set(k, v));
 
   // 兜底：修正 R2 未识别的 MIME 类型
-  fixContentType(headers, path);
+  fixContentType(headers, effectivePath);
 
   // 确保告知客户端支持 Range 请求
   if (!headers.has("Accept-Ranges")) {
     headers.set("Accept-Ranges", "bytes");
   }
 
-  if (path && path.startsWith("_$flaredrive$/thumbnails/")) {
+  if (urlPath && urlPath.startsWith("_$flaredrive$/thumbnails/")) {
     headers.set("Cache-Control", "max-age=31536000");
   }
 
@@ -184,7 +190,13 @@ export async function onRequestGet(context: any) {
 
   const url = getPubUrl(context);
   const request = context.request;
-  const [_, path] = parseBucketPath(context);
+  const [_, urlPath] = parseBucketPath(context);
+
+  // 当使用 /_fd_?name= 占位 URL 时，urlPath 永远是 _fd_，无法用于扩展名匹配和
+  // MIME 修正。必须从 name 参数中提取真实文件路径。
+  const requestUrl = new URL(context.request.url);
+  const nameParam = requestUrl.searchParams.get("name");
+  const effectivePath = nameParam !== null ? nameParam : (urlPath || '');
 
   const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
   const rangeHeader = request.headers.get('Range');
@@ -195,7 +207,7 @@ export async function onRequestGet(context: any) {
   // 注：初始探测虽然透传为 200 全文件（不做 clamp），但必须标记为媒体请求，
   //     否则 Worker 会错误地设置 Content-Disposition 导致 Safari MEDIA_ERR。
   const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
-  const fileExt = ((path || '').split('.').pop() || '').toLowerCase();
+  const fileExt = (effectivePath.split('.').pop() || '').toLowerCase();
   const isMediaExt = mediaExtensions.includes(fileExt);
   const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio')
     || (isMediaExt && rangeHeader !== null);
@@ -216,13 +228,13 @@ export async function onRequestGet(context: any) {
   corsHeaders.forEach((v, k) => headers.set(k, v));
 
   // 兜底：修正 R2 未识别的 MIME 类型（如已上传的视频/音频被存为 octet-stream）
-  fixContentType(headers, path);
+  fixContentType(headers, effectivePath);
 
   // 设置 Content-Disposition 以便浏览器下载时使用正确的文件名
   // （URL 路径中的 _fd_ 占位段不含真实文件名，浏览器会错误地使用 _fd_ 作为文件名）
   // 注意：视频/音频流式请求不设置，避免影响播放器内联解析 Range 响应。
-  if (path && !path.startsWith("_$flaredrive$/thumbnails/") && !isMediaRequest) {
-    const fileName = path.split('/').pop();
+  if (effectivePath && !effectivePath.startsWith("_$flaredrive$/thumbnails/") && !isMediaRequest) {
+    const fileName = effectivePath.split('/').pop();
     if (fileName) {
       headers.set("Content-Disposition", encodeContentDisposition(fileName));
     }
@@ -232,7 +244,7 @@ export async function onRequestGet(context: any) {
     headers.set("Accept-Ranges", "bytes");
   }
 
-  if (path && path.startsWith("_$flaredrive$/thumbnails/")) {
+  if (urlPath && urlPath.startsWith("_$flaredrive$/thumbnails/")) {
     headers.set("Cache-Control", "max-age=31536000");
   } else {
     // 允许浏览器缓存 Range 响应，预取和视频播放器可复用同一 chunk
