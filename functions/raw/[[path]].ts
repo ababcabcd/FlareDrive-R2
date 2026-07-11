@@ -199,18 +199,15 @@ export async function onRequestGet(context: any) {
   const effectivePath = nameParam !== null ? nameParam : (urlPath || '');
 
   const secFetchDest = (request.headers.get('Sec-Fetch-Dest') || '').toLowerCase();
-  const rangeHeader = request.headers.get('Range');
   // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
-  // 这里使用混合检测：
-  // - 浏览器直接发出的 video/audio 请求（含初始探测，无 Range）→ 媒体请求
-  // - SW 代理的请求（可能没有 secFetchDest）→ 通过扩展名 + Range 判断
-  // 注：初始探测虽然透传为 200 全文件（不做 clamp），但必须标记为媒体请求，
-  //     否则 Worker 会错误地设置 Content-Disposition 导致 Safari MEDIA_ERR。
+  // 浏览器 new fetch() 中 Sec-Fetch-Dest 为 empty，因此依赖扩展名判断。
+  // 只要文件扩展名是媒体格式，一律视为媒体请求，不设 Content-Disposition，
+  // 也不依赖 Range 头（Safari 初始探测不带 Range）。
   const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
   const fileExt = (effectivePath.split('.').pop() || '').toLowerCase();
   const isMediaExt = mediaExtensions.includes(fileExt);
   const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio')
-    || (isMediaExt && rangeHeader !== null);
+    || isMediaExt;
   const reqHeaders = new Headers(request.headers);
   reqHeaders.delete('host');
   reqHeaders.delete('origin');
