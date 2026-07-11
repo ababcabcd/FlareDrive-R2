@@ -64,6 +64,8 @@
       </a>
 
       <input 
+        id="search-files"
+        name="search"
         type="search" 
         v-model="search" 
         aria-label="Search" 
@@ -310,8 +312,8 @@
         </div>
         <div class="share-modal-body">
           <div class="share-option">
-            <label>过期时间</label>
-            <select v-model="shareExpires" class="share-select">
+            <label for="share-expires">过期时间</label>
+            <select id="share-expires" name="share-expires" v-model="shareExpires" class="share-select">
               <option :value="30">30分钟</option>
               <option :value="60">1小时</option>
               <option :value="24 * 60">1天</option>
@@ -323,7 +325,7 @@
             {{ shareGenerating ? '生成中...' : '生成分享链接' }}
           </button>
           <div v-if="shareLink" class="share-link-container">
-            <input type="text" :value="shareLink" readonly class="share-link-input" />
+            <input id="share-link" name="share-link" type="text" :value="shareLink" readonly class="share-link-input" />
             <button class="copy-share-btn" @click="copyShareLink">复制链接</button>
           </div>
           <div v-if="shareError" class="share-error">{{ shareError }}</div>
