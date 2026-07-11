@@ -310,7 +310,7 @@ export async function onRequestGet(context) {
       vid.addEventListener('timeupdate', _pfOnTime);
       vid.addEventListener('seeked', _pfOnSeek);
 
-      var MEDIA_CLAMP = 10 * 1024 * 1024; // 与 Worker api/share/download/[[path]].ts 保持一致
+      var MEDIA_CLAMP = 10 * 1024 * 1024; // 与 SW 标准化保持一致
       var startByte = Math.min(_pf.size, MEDIA_CLAMP);
       var BUFFER_THRESHOLD = 5 * 1024 * 1024; // 缓冲到 5MB（钳位的一半）再启动
       var MAX_WAIT = 8000; // 最多等 8 秒

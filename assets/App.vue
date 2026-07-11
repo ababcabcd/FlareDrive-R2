@@ -1657,7 +1657,7 @@ export default {
       this._prefetchMetadataHandled = true;
       const video = e.target;
 
-      // 不预取 byte 0：<video> 的首个 Range 请求已被 Worker 钳位到 0–10MB，
+      // 不预取 byte 0：<video> 的首个 Range 请求已被 SW 标准化为 0–10MB，
       // 预取从 10MB 之后开始，专注预热后续 chunk，避免和 <video> 首包竞争。
       const MEDIA_CLAMP = 10 * 1024 * 1024;
       const startByte = Math.min(this._prefetchFileSize, MEDIA_CLAMP);

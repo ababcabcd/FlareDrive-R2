@@ -11,8 +11,11 @@
  */
 
 const VIDEO_CACHE = 'video-chunks-v5';
-const MAX_CACHE_SIZE = 10 * 1024 * 1024; // 单 chunk 最大缓存 10MB（对齐 Worker clamp 上限）
+const MAX_CACHE_SIZE = 10 * 1024 * 1024; // 单 chunk 最大缓存 10MB
+const MIN_CACHE_SIZE = 100 * 1024; // 小于 100KB 的响应不缓存（避免探测请求污染缓存）
 const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk
+const CHUNK_SIZE = 10 * 1024 * 1024; // 开放区间标准化为 10MB 闭合区间
+const MIN_COVERAGE = 1 * 1024 * 1024; // 开放区间命中缓存的最小连续覆盖长度
 
 // ------------------------- Range 解析 -------------------------
 
@@ -95,7 +98,6 @@ function build206Response(buffer, range, contentType, totalSize) {
 async function serveFromCache(url, range) {
   const cache = await caches.open(VIDEO_CACHE);
   let contentType = 'video/mp4';
-  let totalSize = null;
   const isOpenEnded = range.end < 0;
 
   // 1. 精确匹配：仅闭合区间
@@ -103,8 +105,8 @@ async function serveFromCache(url, range) {
     const exactKey = `${url}|${range.start}-${range.end}`;
     const exactMatch = await cache.match(exactKey);
     if (exactMatch) {
+      const totalSize = getTotalSize(exactMatch);
       contentType = exactMatch.headers.get('Content-Type') || contentType;
-      totalSize = getTotalSize(exactMatch) || totalSize;
       const buffer = await exactMatch.arrayBuffer();
       console.log(`[SW] cache exact HIT  ${range.start}-${range.end}`);
       return build206Response(buffer, range, contentType, totalSize);
@@ -141,13 +143,9 @@ async function serveFromCache(url, range) {
   if (overlapping[0].range.start > range.start) return null;
   if (!isOpenEnded && coverEnd < range.end) return null; // 闭合区间未完全覆盖
 
-  // 开放区间：以实际覆盖的末尾作为响应 end
-  const effectiveRange = isOpenEnded
-    ? { start: range.start, end: coverEnd }
-    : range;
-
-  // 4. 读取各 chunk 并拼接
+  // 4. 读取所有 chunk 并获取总大小
   const buffers = [];
+  let totalSize = null;
   for (const ch of overlapping) {
     const entry = await cache.match(ch.req);
     if (!entry) return null;
@@ -157,7 +155,17 @@ async function serveFromCache(url, range) {
     buffers.push({ buffer: new Uint8Array(buffer), range: ch.range });
   }
 
-  // 5. 合并：各 chunk 中属于请求区间 [effectiveRange.start, effectiveRange.end] 的部分写入
+  // 5. 开放区间：确保连续覆盖长度足够，避免只命中一个极小的探测 chunk 就给浏览器返回几 KB
+  if (isOpenEnded) {
+    const coverage = coverEnd - range.start + 1;
+    const reachesEof = totalSize && coverEnd >= totalSize - 1;
+    if (coverage < MIN_COVERAGE && !reachesEof) return null;
+  }
+
+  // 6. 合并：各 chunk 中属于请求区间 [effectiveRange.start, effectiveRange.end] 的部分写入
+  const effectiveRange = isOpenEnded
+    ? { start: range.start, end: coverEnd }
+    : range;
   const mergedLen = effectiveRange.end - effectiveRange.start + 1;
   const merged = new Uint8Array(mergedLen);
   for (const { buffer, range: cr } of buffers) {
@@ -198,15 +206,14 @@ function withCors(response) {
 
 // ------------------------- 网络请求 + 同步缓存 -------------------------
 
-async function fetchAndCache(request, event) {
+async function fetchAndCache({ url, method, headers }) {
   // 不使用 event.request 直接 fetch：Safari 可能保留原始请求的 opaque/no-cors 模式，
   // 导致 SW 拿不到带 CORS 头的完整响应。
   // 使用 fetch(url, opts) 而非 new Request()：后者在 Safari SW 中有兼容问题，
   // 且需要手动传递 method（否则 HEAD 变 GET 会导致分享页阻塞下载全文件）。
-  const url = request.url;
   const rawResponse = await fetch(url, {
-    method: request.method,
-    headers: request.headers,
+    method,
+    headers,
   });
 
   // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储。
@@ -214,7 +221,9 @@ async function fetchAndCache(request, event) {
     const actualRange = parseContentRange(rawResponse.headers.get('Content-Range'));
     if (actualRange) {
       const actualSize = actualRange.end - actualRange.start + 1;
-      if (actualSize <= MAX_CACHE_SIZE) {
+      // 只缓存大小在 [MIN_CACHE_SIZE, MAX_CACHE_SIZE] 之间的 chunk，
+      // 既避免大响应撑爆缓存，也避免 tiny probe 污染缓存。
+      if (actualSize >= MIN_CACHE_SIZE && actualSize <= MAX_CACHE_SIZE) {
         const cacheKey = `${url}|${actualRange.start}-${actualRange.end}`;
         const cloned = rawResponse.clone();
         const cachedHeaders = new Headers();
@@ -311,11 +320,23 @@ self.addEventListener('fetch', (event) => {
         if (range) {
           const cached = await serveFromCache(event.request.url, range);
           if (cached) return cached;
+
+          // 开放区间（如 bytes=0- / bytes=491520-）会让 R2 返回从 start 到文件末尾的大段，
+          // 远超 MAX_CACHE_SIZE，导致 cache 永远写不进去。标准化为 10MB 闭合区间后，
+          // 响应可被缓存，且后续 seek 回该区间时能命中缓存。
+          if (range.end < 0) {
+            const normalizedEnd = range.start + CHUNK_SIZE - 1;
+            const headers = new Headers(event.request.headers);
+            headers.set('Range', `bytes=${range.start}-${normalizedEnd}`);
+            console.log(`[SW] cache MISS ${range.start}-open, normalize to ${range.start}-${normalizedEnd}`);
+            return fetchAndCache({ url: event.request.url, method: event.request.method, headers });
+          }
+
           console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
         }
       }
-      // 网络获取 + 异步缓存
-      return fetchAndCache(event.request, event);
+      // 网络获取 + 同步缓存
+      return fetchAndCache({ url: event.request.url, method: event.request.method, headers: event.request.headers });
     })()
   );
 });
