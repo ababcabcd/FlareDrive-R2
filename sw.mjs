@@ -228,31 +228,12 @@ async function fetchAndCache({ url, method, headers }) {
       // 既避免大响应撑爆缓存，也避免 tiny probe 污染缓存。
       if (actualSize >= MIN_CACHE_SIZE && actualSize <= MAX_CACHE_SIZE) {
         const cacheKey = `${url}|${actualRange.start}-${actualRange.end}`;
+        // 非阻塞写入：clone 一份专门给缓存，不阻塞返回给浏览器的响应。
+        // await cache.put() 会消费 clone 的 body，如果在此处 await，
+        // 某些浏览器实现可能导致原始 rawResponse.body 的流状态异常，
+        // 进而让浏览器端视频元素收到不完整的响应，触发 MEDIA_ERR。
         const cloned = rawResponse.clone();
-        const cachedHeaders = new Headers();
-        const ct = cloned.headers.get('Content-Type');
-        if (ct) cachedHeaders.set('Content-Type', ct);
-        if (actualRange.total) {
-          cachedHeaders.set('X-Total-Size', String(actualRange.total));
-        }
-        const cachedResponse = new Response(cloned.body, {
-          status: 200,
-          statusText: 'OK',
-          headers: cachedHeaders,
-        });
-        try {
-          const cache = await caches.open(VIDEO_CACHE);
-          await cache.put(cacheKey, cachedResponse);
-          console.log(`[SW] cache write OK: ${cacheKey}`);
-          // LRU 淘汰
-          const keys = await cache.keys();
-          if (keys.length > MAX_CACHE_ENTRIES) {
-            const toDelete = keys.slice(0, keys.length - MAX_CACHE_ENTRIES);
-            await Promise.all(toDelete.map(k => cache.delete(k)));
-          }
-        } catch (e) {
-          console.warn('[SW] cache write FAIL:', e.message);
-        }
+        scheduleCacheWrite(cloned, cacheKey, actualRange.total);
       } else {
         console.log(`[SW] cache write SKIP: size=${actualSize} out of [${MIN_CACHE_SIZE}, ${MAX_CACHE_SIZE}]`);
       }
@@ -263,6 +244,34 @@ async function fetchAndCache({ url, method, headers }) {
 
   // 显式追加 CORS 头：Safari 对 SW 拦截的媒体请求要求 Response 必须包含 Allow-Origin
   return withCors(rawResponse);
+}
+
+// 非阻塞缓存写入：fire-and-forget，不阻塞 fetch 响应返回
+async function scheduleCacheWrite(response, cacheKey, totalSize) {
+  try {
+    const cachedHeaders = new Headers();
+    const ct = response.headers.get('Content-Type');
+    if (ct) cachedHeaders.set('Content-Type', ct);
+    if (totalSize) {
+      cachedHeaders.set('X-Total-Size', String(totalSize));
+    }
+    const cachedResponse = new Response(response.body, {
+      status: 200,
+      statusText: 'OK',
+      headers: cachedHeaders,
+    });
+    const cache = await caches.open(VIDEO_CACHE);
+    await cache.put(cacheKey, cachedResponse);
+    console.log(`[SW] cache write OK: ${cacheKey}`);
+    // LRU 淘汰
+    const keys = await cache.keys();
+    if (keys.length > MAX_CACHE_ENTRIES) {
+      const toDelete = keys.slice(0, keys.length - MAX_CACHE_ENTRIES);
+      await Promise.all(toDelete.map(k => cache.delete(k)));
+    }
+  } catch (e) {
+    console.warn('[SW] cache write FAIL:', e.message);
+  }
 }
 
 // ===================== Event Listeners =====================
