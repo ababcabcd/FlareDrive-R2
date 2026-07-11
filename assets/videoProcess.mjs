@@ -126,12 +126,27 @@ function isContainerBox(type) {
 function doFaststart(arrayBuffer) {
   const src = new Uint8Array(arrayBuffer);
 
-  // 1. 解析所有顶层 box
+  // 1. 解析所有顶层 box，跳过不构成有效 box 的前导字节
+  //    某些编码器可能在前 8 字节写入非 MP4 box 格式的数据（如帧头残留），
+  //    这些字节不应被当作 box 处理，否则会污染输出结构。
   const topBoxes = [];
   let off = 0;
   while (off + 8 <= src.length) {
     const box = readBox(src, off);
     if (!box || box.size <= 0) break;
+
+    // 只接受已知的顶层 box 类型；未知 type 可能是前导垃圾数据，
+    // 此时丢弃这 8 个字节，从下一偏移继续扫描
+    const KNOWN_TOP_TYPES = [
+      'ftyp', 'moov', 'mdat', 'free', 'skip', 'wide',
+      'styp', 'sidx', 'mfra', 'mfro', 'uuid',
+    ];
+    if (!KNOWN_TOP_TYPES.includes(box.type)) {
+      console.warn(`[VideoProcess] 跳过来自 offset=${off} 的未知顶层 box type="${box.type}" (${box.size}B)`);
+      off += 8; // 最小步进，继续扫描
+      continue;
+    }
+
     topBoxes.push(box);
     off += box.size;
   }
@@ -149,14 +164,16 @@ function doFaststart(arrayBuffer) {
 
   if (!ftyp) return null;
 
-  // 2. 构建：ftyp → moov → 其余（mdat + 其他 box）
-  const moovData = src.slice(moov.offset, moov.offset + moov.size);
+  // 2. 复制 moov 到独立缓冲区，避免 updateChunkOffsets 修改原始 src
+  //    （Uint8Array.slice() 共享底层 ArrayBuffer，原地修改可能污染其他 box）
+  const moovRaw = src.slice(moov.offset, moov.offset + moov.size);
+  const moovData = new Uint8Array(moovRaw); // 独立副本
   const moovSize = moov.size;
 
   // moov 移到 mdat 前面 → mdat 内数据的绝对偏移都增加了 moovSize
   updateChunkOffsets(moovData, moov.headerSize, moov.size - moov.headerSize, moovSize);
 
-  // 2. 拼接输出：ftyp → moov → 其余
+  // 3. 拼接输出：ftyp → moov → 其余（mdat + free/skip/wide 等）
   const ftypData = src.slice(ftyp.offset, ftyp.offset + ftyp.size);
   const restBoxes = topBoxes.filter(b => b !== ftyp && b !== moov);
   const restParts = restBoxes.map(b => src.slice(b.offset, b.offset + b.size));
@@ -168,7 +185,32 @@ function doFaststart(arrayBuffer) {
   out.set(moovData, w); w += moovSize;
   for (const p of restParts) { out.set(p, w); w += p.length; }
 
-  console.log(`[VideoProcess] faststart: moov ${moov.offset}→${ftyp.size}, shift=${moovSize}`);
+  // 4. 验证：输出文件必须以 'ftyp' 开头（Safari AVFoundation 严格要求）
+  if (w < 8 || String.fromCharCode(out[4], out[5], out[6], out[7]) !== 'ftyp') {
+    // 扫描 'ftyp' 魔术字节，定位真实 ftyp 位置并截断前导垃圾
+    let ftypPos = -1;
+    for (let i = 0; i < Math.min(w - 8, 256); i++) {
+      if (out[i + 4] === 0x66 && out[i + 5] === 0x74 &&
+          out[i + 6] === 0x79 && out[i + 7] === 0x70) {
+        ftypPos = i;
+        break;
+      }
+    }
+    if (ftypPos > 0) {
+      // ftyp 前面有垃圾字节：重新计算 ftyp size 并截断
+      const actualFtypSize = readU32(out, ftypPos);
+      if (actualFtypSize > 0 && actualFtypSize <= w - ftypPos) {
+        const trimmed = out.slice(ftypPos, w);
+        console.log(`[VideoProcess] 已截断输出头部 ${ftypPos}B，修正后退出的 size=${actualFtypSize}`);
+        return { data: trimmed.buffer, shifted: true };
+      }
+    }
+    // 无法修复：返回 null，让 optimizeVideo 使用原始文件
+    console.error('[VideoProcess] 输出文件头异常，无法验证 ftyp，回退到原始文件');
+    return null;
+  }
+
+  console.log(`[VideoProcess] faststart: moov ${moov.offset}→${ftyp.size}, shift=${moovSize}, output=${w}B`);
   return { data: out.buffer, shifted: true };
 }
 

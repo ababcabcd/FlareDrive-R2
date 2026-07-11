@@ -15,11 +15,14 @@ const EXT_TO_MIME: Record<string, string> = {
 };
 
 function resolveContentType(name: string, contentType?: string): string {
-  if (contentType && contentType !== 'application/octet-stream') {
-    return contentType;
+  // 只在 R2 返回了错误/缺失的 MIME 类型时才用扩展名兜底
+  // 与 raw/[[path]].ts 的 fixContentType 保持一致：处理 octet-stream、binary/ 前缀、空值
+  const ct = (contentType || '').toLowerCase();
+  if (ct && ct !== 'application/octet-stream' && !ct.startsWith('binary/')) {
+    return ct;
   }
   const ext = (name.split('.').pop() || '').toLowerCase();
-  return EXT_TO_MIME[ext] || contentType || 'application/octet-stream';
+  return EXT_TO_MIME[ext] || ct || 'application/octet-stream';
 }
 
 interface ShareMetadata {
