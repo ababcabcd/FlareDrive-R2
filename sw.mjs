@@ -216,9 +216,12 @@ async function fetchAndCache({ url, method, headers }) {
     headers,
   });
 
+  const contentRange = rawResponse.headers.get('Content-Range');
+  const actualRange = parseContentRange(contentRange);
+  console.log(`[SW] fetch response status=${rawResponse.status}, content-range=${contentRange}, parsed=${actualRange ? actualRange.start+'-'+actualRange.end : 'null'}`);
+
   // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储。
   if (rawResponse.ok && rawResponse.status === 206) {
-    const actualRange = parseContentRange(rawResponse.headers.get('Content-Range'));
     if (actualRange) {
       const actualSize = actualRange.end - actualRange.start + 1;
       // 只缓存大小在 [MIN_CACHE_SIZE, MAX_CACHE_SIZE] 之间的 chunk，
@@ -250,7 +253,11 @@ async function fetchAndCache({ url, method, headers }) {
         } catch (e) {
           console.warn('[SW] cache write FAIL:', e.message);
         }
+      } else {
+        console.log(`[SW] cache write SKIP: size=${actualSize} out of [${MIN_CACHE_SIZE}, ${MAX_CACHE_SIZE}]`);
       }
+    } else {
+      console.log('[SW] cache write SKIP: Content-Range parse failed');
     }
   }
 
