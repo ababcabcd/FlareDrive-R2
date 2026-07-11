@@ -12,7 +12,7 @@
 
 const VIDEO_CACHE = 'video-chunks-v5';
 const MAX_CACHE_SIZE = 10 * 1024 * 1024; // 单 chunk 最大缓存 10MB
-const MIN_CACHE_SIZE = 100 * 1024; // 小于 100KB 的响应不缓存（避免探测请求污染缓存）
+const MIN_CACHE_SIZE = 32 * 1024; // 小于 32KB 的响应不缓存（避免极小探测请求污染缓存）
 const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk
 const CHUNK_SIZE = 10 * 1024 * 1024; // 开放区间标准化为 10MB 闭合区间
 const MIN_COVERAGE = 1 * 1024 * 1024; // 开放区间命中缓存的最小连续覆盖长度
@@ -109,6 +109,7 @@ async function serveFromCache(url, range) {
       contentType = exactMatch.headers.get('Content-Type') || contentType;
       const buffer = await exactMatch.arrayBuffer();
       console.log(`[SW] cache exact HIT  ${range.start}-${range.end}`);
+      sendDiag('cache-hit', { range: `${range.start}-${range.end}`, mode: 'exact' });
       return build206Response(buffer, range, contentType, totalSize);
     }
   }
@@ -180,7 +181,19 @@ async function serveFromCache(url, range) {
   }
 
   console.log(`[SW] cache merge HIT  ${effectiveRange.start}-${effectiveRange.end}`);
+  sendDiag('cache-hit', { range: `${effectiveRange.start}-${effectiveRange.end}`, mode: 'merge', chunks: overlapping.length });
   return build206Response(merged.buffer, effectiveRange, contentType, totalSize);
+}
+
+// ------------------------- 页面诊断通道 -------------------------
+
+// 把 SW 内部事件广播给所有受控页面，让用户在页面控制台就能看到 SW 状态
+// 解决 Safari 中 SW 控制台独立、不易发现的问题
+function sendDiag(type, payload) {
+  self.clients.matchAll().then(clients => {
+    const msg = { source: 'SW', type, ...payload, ts: Date.now() };
+    clients.forEach(c => c.postMessage(msg));
+  }).catch(() => {});
 }
 
 // ------------------------- CORS 安全响应包装 -------------------------
@@ -236,9 +249,11 @@ async function fetchAndCache({ url, method, headers }) {
         scheduleCacheWrite(cloned, cacheKey, actualRange.total);
       } else {
         console.log(`[SW] cache write SKIP: size=${actualSize} out of [${MIN_CACHE_SIZE}, ${MAX_CACHE_SIZE}]`);
+        sendDiag('cache-skip', { reason: 'size', size: actualSize, min: MIN_CACHE_SIZE, max: MAX_CACHE_SIZE });
       }
     } else {
       console.log('[SW] cache write SKIP: Content-Range parse failed');
+      sendDiag('cache-skip', { reason: 'parse', contentRange });
     }
   }
 
@@ -263,6 +278,7 @@ async function scheduleCacheWrite(response, cacheKey, totalSize) {
     const cache = await caches.open(VIDEO_CACHE);
     await cache.put(cacheKey, cachedResponse);
     console.log(`[SW] cache write OK: ${cacheKey}`);
+    sendDiag('cache-write', { key: cacheKey, size: undefined });
     // LRU 淘汰
     const keys = await cache.keys();
     if (keys.length > MAX_CACHE_ENTRIES) {
@@ -345,10 +361,24 @@ self.addEventListener('fetch', (event) => {
             const headers = new Headers(event.request.headers);
             headers.set('Range', `bytes=${range.start}-${normalizedEnd}`);
             console.log(`[SW] cache MISS ${range.start}-open, normalize to ${range.start}-${normalizedEnd}`);
+            sendDiag('cache-miss', { range: `${range.start}-open`, normalized: `${range.start}-${normalizedEnd}` });
+            return fetchAndCache({ url: event.request.url, method: event.request.method, headers });
+          }
+
+          // Safari 经常发送超大闭区间（如 30MB 的 bytes=12451840-42860543），
+          // 响应远超 MAX_CACHE_SIZE 导致无法缓存。和开放区间一样 clamp 到 10MB。
+          const rangeSize = range.end - range.start + 1;
+          if (rangeSize > CHUNK_SIZE) {
+            const clampedEnd = range.start + CHUNK_SIZE - 1;
+            const headers = new Headers(event.request.headers);
+            headers.set('Range', `bytes=${range.start}-${clampedEnd}`);
+            console.log(`[SW] cache MISS ${range.start}-${range.end} (${(rangeSize/1024/1024).toFixed(1)}MB), clamp to ${range.start}-${clampedEnd}`);
+            sendDiag('cache-miss', { range: `${range.start}-${range.end}`, clamped: `${(rangeSize/1024/1024).toFixed(1)}MB → ${range.start}-${clampedEnd}` });
             return fetchAndCache({ url: event.request.url, method: event.request.method, headers });
           }
 
           console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
+          sendDiag('cache-miss', { range: `${range.start}-${range.end}` });
         }
       }
       // 网络获取 + 同步缓存

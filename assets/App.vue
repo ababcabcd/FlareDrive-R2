@@ -504,6 +504,23 @@ export default {
             // 立即检查更新，确保加载最新 sw.mjs
             reg.update().catch(() => {});
 
+            // 监听 SW 诊断消息，在页面控制台直接显示 SW 状态
+            // Safari 中 SW 控制台独立，此通道让用户无需切换即可看到缓存命中/写入信息
+            navigator.serviceWorker.addEventListener('message', (ev) => {
+              if (ev.data && ev.data.source === 'SW') {
+                const d = ev.data;
+                if (d.type === 'cache-hit') {
+                  console.log(`[SW→Page] ${d.mode==='exact'?'精确':'合并'}命中 ${d.range}${d.chunks?` (${d.chunks}块)` : ''}`);
+                } else if (d.type === 'cache-miss') {
+                  console.log(`[SW→Page] 未命中 ${d.range}${d.normalized?` → ${d.normalized}` : ''}`);
+                } else if (d.type === 'cache-write') {
+                  console.log(`[SW→Page] 写入 ${d.key?.split('|').pop() || ''}`);
+                } else if (d.type === 'cache-skip') {
+                  console.log(`[SW→Page] 跳过写入 ${d.reason}`);
+                }
+              }
+            });
+
             const pingSw = () => {
               if (!navigator.serviceWorker.controller) return;
               const channel = new MessageChannel();

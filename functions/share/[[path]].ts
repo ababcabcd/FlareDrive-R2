@@ -230,6 +230,21 @@ export async function onRequestGet(context) {
       navigator.serviceWorker.register('/sw.mjs', { scope: '/', updateViaCache: 'none' })
         .then(function(reg) { reg.update().catch(function() {}); })
         .catch(function() {});
+      // 监听 SW 诊断消息，在页面控制台直接显示 SW 状态
+      navigator.serviceWorker.addEventListener('message', function(ev) {
+        if (ev.data && ev.data.source === 'SW') {
+          var d = ev.data;
+          if (d.type === 'cache-hit') {
+            console.log('[SW→Page] ' + (d.mode==='exact'?'精确':'合并') + '命中 ' + d.range + (d.chunks?(' ('+d.chunks+'块)'):''));
+          } else if (d.type === 'cache-miss') {
+            console.log('[SW→Page] 未命中 ' + d.range + (d.normalized?(' → '+d.normalized):''));
+          } else if (d.type === 'cache-write') {
+            console.log('[SW→Page] 写入 ' + (d.key?d.key.split('|').pop():''));
+          } else if (d.type === 'cache-skip') {
+            console.log('[SW→Page] 跳过写入 ' + d.reason);
+          }
+        }
+      });
     }
     
     function isImage(type) { return type && /^image\\//.test(type); }
