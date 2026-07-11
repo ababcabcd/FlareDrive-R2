@@ -247,6 +247,22 @@ export async function onRequestGet(context) {
       });
     }
     
+    function resolveContentType(name, contentType) {
+      var ct = (contentType || '').toLowerCase();
+      if (ct && ct !== 'application/octet-stream' && !ct.startsWith('binary/')) return ct;
+      var ext = (name.split('.').pop() || '').toLowerCase();
+      var map = {
+        mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
+        webm: 'video/webm', ogv: 'video/ogg', ogg: 'video/ogg',
+        mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+        aac: 'audio/aac', m4a: 'audio/mp4', oga: 'audio/ogg',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+        svg: 'image/svg+xml', avif: 'image/avif'
+      };
+      return map[ext] || ct || 'application/octet-stream';
+    }
+
     function isImage(type) { return type && /^image\\//.test(type); }
     function isVideo(type) { return type && /^video\\//.test(type); }
     function isAudio(type) { return type && /^audio\\//.test(type); }
@@ -398,6 +414,8 @@ export async function onRequestGet(context) {
       
       if (data.valid) {
         shareFileName = data.fileName;
+        // 兜底修正 Content-Type，兼容 R2 存成 octet-stream 的情况
+        data.contentType = resolveContentType(data.fileName, data.contentType);
         var icon = getIcon(data.contentType);
         var label = getLabel(data.contentType);
         

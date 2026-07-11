@@ -193,9 +193,10 @@
           <div @click="preview(rawUrl(file.key), file.httpMetadata.contentType, file.key.split('/').pop())" @contextmenu.prevent="
             showContextMenu = true;
           focusedItem = file;" class="file-item" style="position: relative;">
-            <MimeIcon :content-type="file.httpMetadata.contentType" :thumbnail="file.customMetadata.thumbnail
-              ? `/raw/_$flaredrive$/thumbnails/${file.customMetadata.thumbnail}.png`
-              : null
+            <MimeIcon :content-type="file.httpMetadata.contentType" :name="file.key.split('/').pop()"
+              :thumbnail="file.customMetadata.thumbnail
+                ? `/raw/_$flaredrive$/thumbnails/${file.customMetadata.thumbnail}.png`
+                : null
               " />
             <div class="file-info-container">
               <div class="file-name" v-text="file.key.split('/').pop()"></div>
