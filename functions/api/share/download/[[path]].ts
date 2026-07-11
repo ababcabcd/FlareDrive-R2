@@ -277,19 +277,17 @@ export async function onRequestGet(context: any) {
 
     // SW 用 fetch() 转发请求时无法保留 Sec-Fetch-Dest（forbidden header），
     // 导致 Worker 无法识别媒体请求。这里改为混合检测：
-    // 1. Sec-Fetch-Dest 直接是 video/audio → 一定是媒体请求
+    // 1. Sec-Fetch-Dest 直接是 video/audio → 一定是媒体请求（含初始探测）
     // 2. 否则，如果请求带了 Range 且文件扩展名是视频/音频格式 → 也是媒体请求
     //    （SW 转发的流式 Range 请求，Sec-Fetch-Dest 已丢失但保留了 Range）
-    // 关键：必须同时有 Range 头才 clamp。无 Range 请求（Safari <video> 初始探测）
-    // 直接透传为 200 全文件，否则 Safari 拿到 206/10MB 会因数据不完整卡住。
-    // 注意：不能仅凭扩展名判断，否则下载请求（window.location.href 导航）也会被
-    // 当作媒体处理，导致 Content-Disposition 不设、Range 被错误夹紧、下载变预览。
+    // 注：初始探测虽然透传为 200 全文件（不做 clamp），但必须标记为媒体请求，
+    //     否则 Worker 会设置 Content-Disposition: attachment 导致 Safari MEDIA_ERR。
     const fileName = fileKey.split('/').pop() || '';
     const mediaExtensions = ['mp4','m4v','mov','webm','ogv','ogg','mp3','wav','flac','aac','m4a','oga'];
     const fileExt = (fileName.split('.').pop() || '').toLowerCase();
     const isMediaExt = mediaExtensions.includes(fileExt);
-    const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio' || isMediaExt)
-      && rangeHeader !== null;
+    const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio')
+      || (isMediaExt && rangeHeader !== null);
 
     // 媒体请求不再手动夹紧 Range，直接原样透传给 R2。
     // Safari 对 moov-at-end 的视频需要自己控制请求范围来获取 metadata；任何

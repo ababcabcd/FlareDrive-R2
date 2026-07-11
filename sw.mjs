@@ -331,12 +331,16 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 仅拦截带 Range 头的请求（视频/音频流式播放 + 预取），其余请求直接透传。
-  // 无 Range 请求（图片、下载导航、Safari 初始探测等）不做任何包装，Worker 端
-  // 已返回完整 CORS 头 + 正确 Content-Type（fixContentType），SW 中间跳反而
-  // 可能引入 opaque response / body null 等问题，引发 MEDIA_ERR_SRC_NOT_SUPPORTED。
+  // 无 Range 请求（图片、下载导航、Safari 初始探测等）不通过 fetch(event.request)
+  // 透传：Safari SW 中 event.request 可能带有特定 mode/credentials 导致
+  // fetch() 返回 body=null 的 opaque response，引发 MEDIA_ERR_SRC_NOT_SUPPORTED。
+  // 使用 fetch(url, opts) 手动构造请求，确保得到完整可读的响应。
   const rangeHeader = event.request.headers.get('Range');
   if (!rangeHeader) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(fetch(event.request.url, {
+      method: event.request.method,
+      headers: event.request.headers,
+    }));
     return;
   }
 
