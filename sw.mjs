@@ -327,8 +327,11 @@ self.addEventListener('fetch', (event) => {
     // 非目标路径：也必须调用 respondWith，否则 Safari 会因注册了 fetch 监听器
     // 而不自动 fallback 到网络，导致页面请求挂起。
     // 导航请求（mode=navigate）不能直接用 fetch(event.request)，浏览器不允许 SW
-    // 对同一个导航请求再发起导航。改用普通 GET 请求并优先使用 navigation preload。
-    const p = event.preloadResponse || fetch(event.request.url, { method: 'GET' });
+    // 对同一个导航请求再发起导航。改用普通 GET 请求：preloadResponse 如果启用了
+    // navigation preload 会直接返回缓存响应，否则 resolve 为 undefined 需要 fallback。
+    const p = event.preloadResponse
+      .then(r => r || fetch(event.request.url, { method: 'GET' }))
+      .catch(() => fetch(event.request.url, { method: 'GET' }));
     event.respondWith(p);
     return;
   }
