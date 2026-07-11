@@ -323,18 +323,23 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // 只拦截视频/下载端点
-  if (!url.pathname.startsWith('/raw/') && !url.pathname.startsWith('/api/share/download/')) {
-    // 非目标路径：也必须调用 respondWith，否则 Safari 会因注册了 fetch 监听器
-    // 而不自动 fallback 到网络，导致页面请求挂起。
-    // 导航请求（mode=navigate）不能直接用 fetch(event.request)，浏览器不允许 SW
-    // 对同一个导航请求再发起导航。改用普通 GET 请求：preloadResponse 如果启用了
-    // navigation preload 会直接返回缓存响应，否则 resolve 为 undefined 需要 fallback。
+if (!url.pathname.startsWith('/raw/') && !url.pathname.startsWith('/api/share/download/')) {
+  // 非目标路径：也必须调用 respondWith，否则 Safari 会因注册了 fetch 监听器
+  // 而不自动 fallback 到网络，导致页面请求挂起。
+  // 导航请求（mode=navigate）不能直接用 fetch(event.request)，浏览器不允许 SW
+  // 对同一个导航请求再发起导航。改用普通 GET 请求：preloadResponse 如果启用了
+  // navigation preload 会直接返回缓存响应，否则 resolve 为 undefined 需要 fallback。
+  if (event.request.mode === 'navigate') {
     const p = event.preloadResponse
       .then(r => r || fetch(event.request.url, { method: 'GET' }))
       .catch(() => fetch(event.request.url, { method: 'GET' }));
     event.respondWith(p);
-    return;
+  } else {
+    // 非导航请求（如 POST /api/children/）必须原样透传，保留 method/headers/body
+    event.respondWith(fetch(event.request));
   }
+  return;
+}
 
   // 仅拦截带 Range 头的请求（视频/音频流式播放 + 预取），其余请求直接透传。
   // 无 Range 请求（图片、下载导航、Safari 初始探测等）不通过 fetch(event.request)

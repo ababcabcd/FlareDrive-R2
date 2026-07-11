@@ -8,8 +8,10 @@
       </div>
       <form class="login-form" @submit.prevent="doLogin">
         <div class="login-field">
-          <label>用户名</label>
+          <label for="login-username">用户名</label>
           <input
+            id="login-username"
+            name="username"
             type="text"
             v-model="loginUsername"
             placeholder="请输入用户名"
@@ -18,8 +20,10 @@
           />
         </div>
         <div class="login-field">
-          <label>密码</label>
+          <label for="login-password">密码</label>
           <input
+            id="login-password"
+            name="password"
             type="password"
             v-model="loginPassword"
             placeholder="请输入密码"

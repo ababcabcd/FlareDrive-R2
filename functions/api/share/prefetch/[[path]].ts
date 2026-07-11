@@ -109,6 +109,10 @@ function metaCacheGet(token: string): CachedMeta | null {
   return entry;
 }
 
+function metaCacheDelete(token: string) {
+  META_CACHE.delete(token);
+}
+
 function metaCacheSet(token: string, meta: CachedMeta) {
   if (META_CACHE.size >= META_CACHE_MAX) {
     let oldestK = '', oldestT = Infinity;
@@ -168,6 +172,13 @@ export async function onRequestGet(context: any) {
 
     let fileKey: string;
     if (cachedMeta) {
+      // META_CACHE 命中后仍需轻量级校验分享是否已被删除（仅 HEAD，不读内容）
+      const shareKey = `${SHARES_PREFIX}${token}.json`;
+      const shareExists = await bucket.head(shareKey);
+      if (!shareExists) {
+        metaCacheDelete(token);
+        return new Response("分享链接不存在", { status: 404 });
+      }
       fileKey = cachedMeta.key;
     } else {
       const { key, errorResponse } = await validateShare(bucket, token);

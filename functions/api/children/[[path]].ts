@@ -6,11 +6,38 @@ export async function onRequestOptions() {
   return new Response(null, {
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "X-Flare-Auth, Content-Type, Authorization",
       "Access-Control-Max-Age": "86400",
     },
   });
+}
+
+export async function onRequestPost(context) {
+  try {
+    const [bucket, rawPath] = parseBucketPath(context);
+    const path = rawPath ? rawPath.replace(/\/+$/, "") : "";
+    if (!bucket || (path && `${path}/`.startsWith("_$flaredrive$/"))) return notFound();
+    const allowList = get_allow_list(context);
+    if (!allowList) {
+      const headers = new Headers();
+      headers.set("WWW-Authenticate", 'Basic realm="需要登录"');
+      return new Response("没有读取权限", { status: 401, headers });
+    }
+    if (path && !can_access_path(context, path)) {
+      const headers = new Headers();
+      headers.set("WWW-Authenticate", 'Basic realm="需要登录"');
+      return new Response("没有读取权限", { status: 401, headers });
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  } catch (e) {
+    return new Response(e.toString(), { status: 500 });
+  }
 }
 
 export async function onRequestGet(context) {

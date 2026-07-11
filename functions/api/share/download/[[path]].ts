@@ -86,6 +86,10 @@ function metaCacheGet(token: string): CachedMeta | null {
   return entry;
 }
 
+function metaCacheDelete(token: string) {
+  META_CACHE.delete(token);
+}
+
 // 根据扩展名兜底映射 MIME 类型（R2 上传时可能存成 application/octet-stream）
 const EXT_TO_MIME: Record<string, string> = {
   mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
@@ -245,6 +249,13 @@ export async function onRequestGet(context: any) {
     let fileContentType: string | undefined;
 
     if (cachedMeta) {
+      // META_CACHE 命中后仍需轻量级校验分享是否已被删除（仅 HEAD，不读内容）
+      const shareKey = `${SHARES_PREFIX}${token}.json`;
+      const shareExists = await bucket.head(shareKey);
+      if (!shareExists) {
+        metaCacheDelete(token);
+        return new Response("分享链接不存在", { status: 404 });
+      }
       fileKey = cachedMeta.key;
       fileSize = cachedMeta.size;
       fileContentType = cachedMeta.contentType;
