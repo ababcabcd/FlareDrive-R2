@@ -18,11 +18,21 @@ const MAX_CACHE_ENTRIES = 60; // 最多保留 60 个 chunk
 
 function parseRange(header) {
   if (!header) return null;
-  const m = header.match(/^bytes=(\d+)-(\d+)$/);
-  if (!m) return null;
-  const start = parseInt(m[1], 10), end = parseInt(m[2], 10);
-  if (isNaN(start) || isNaN(end) || start > end) return null;
-  return { start, end };
+  // 闭合区间: bytes=X-Y
+  let m = header.match(/^bytes=(\d+)-(\d+)$/);
+  if (m) {
+    const start = parseInt(m[1], 10), end = parseInt(m[2], 10);
+    if (isNaN(start) || isNaN(end) || start > end) return null;
+    return { start, end };
+  }
+  // 开放区间: bytes=X- (Safari 初始探测/seek 可能发送)
+  m = header.match(/^bytes=(\d+)-$/);
+  if (m) {
+    const start = parseInt(m[1], 10);
+    if (isNaN(start)) return null;
+    return { start, end: -1 }; // -1 = 到文件末尾
+  }
+  return null;
 }
 
 function extractRange(keyUrl) {
@@ -86,29 +96,33 @@ async function serveFromCache(url, range) {
   const cache = await caches.open(VIDEO_CACHE);
   let contentType = 'video/mp4';
   let totalSize = null;
+  const isOpenEnded = range.end < 0;
 
-  // 1. 精确匹配：请求 Range 与缓存 key 完全一致
-  const exactKey = `${url}|${range.start}-${range.end}`;
-  const exactMatch = await cache.match(exactKey);
-  if (exactMatch) {
-    contentType = exactMatch.headers.get('Content-Type') || contentType;
-    totalSize = getTotalSize(exactMatch) || totalSize;
-    const buffer = await exactMatch.arrayBuffer();
-    return build206Response(buffer, range, contentType, totalSize);
+  // 1. 精确匹配：仅闭合区间
+  if (!isOpenEnded) {
+    const exactKey = `${url}|${range.start}-${range.end}`;
+    const exactMatch = await cache.match(exactKey);
+    if (exactMatch) {
+      contentType = exactMatch.headers.get('Content-Type') || contentType;
+      totalSize = getTotalSize(exactMatch) || totalSize;
+      const buffer = await exactMatch.arrayBuffer();
+      console.log(`[SW] cache exact HIT  ${range.start}-${range.end}`);
+      return build206Response(buffer, range, contentType, totalSize);
+    }
   }
 
-  // 2. 收集与请求区间有交集的缓存 chunk（不要求 2MB 对齐）
-  //    支持管理页 10MB chunk 和分享页 2MB chunk 混存
+  // 2. 收集与请求区间有交集的缓存 chunk
+  //    开放区间用 MAX_SAFE_INTEGER 作为搜索上界
   const keys = await cache.keys();
   const overlapping = [];
+  const searchEnd = isOpenEnded ? Number.MAX_SAFE_INTEGER : range.end;
 
   for (const req of keys) {
     const keyUrl = req.url;
     if (!keyUrl.startsWith(url + '|')) continue;
     const cacheRange = extractRange(keyUrl);
     if (!cacheRange) continue;
-    // 区间交集：两个区间 [a,b] 和 [c,d] 相交当且仅当 a<=d 且 c<=b
-    if (cacheRange.start <= range.end && cacheRange.end >= range.start) {
+    if (cacheRange.start <= searchEnd && cacheRange.end >= range.start) {
       overlapping.push({ req, range: cacheRange });
     }
   }
@@ -120,13 +134,17 @@ async function serveFromCache(url, range) {
   let coverEnd = -1;
   for (const ch of overlapping) {
     if (coverEnd >= 0 && ch.range.start > coverEnd + 1) {
-      return null; // 有空洞，缓存不足以覆盖
+      return null; // 有空洞
     }
     coverEnd = Math.max(coverEnd, ch.range.end);
   }
-  if (overlapping[0].range.start > range.start || coverEnd < range.end) {
-    return null; // 缓存区间未能完全覆盖请求区间
-  }
+  if (overlapping[0].range.start > range.start) return null;
+  if (!isOpenEnded && coverEnd < range.end) return null; // 闭合区间未完全覆盖
+
+  // 开放区间：以实际覆盖的末尾作为响应 end
+  const effectiveRange = isOpenEnded
+    ? { start: range.start, end: coverEnd }
+    : range;
 
   // 4. 读取各 chunk 并拼接
   const buffers = [];
@@ -139,21 +157,22 @@ async function serveFromCache(url, range) {
     buffers.push({ buffer: new Uint8Array(buffer), range: ch.range });
   }
 
-  // 5. 合并：各 chunk 中属于请求区间 [range.start, range.end] 的部分写入
-  const mergedLen = range.end - range.start + 1;
+  // 5. 合并：各 chunk 中属于请求区间 [effectiveRange.start, effectiveRange.end] 的部分写入
+  const mergedLen = effectiveRange.end - effectiveRange.start + 1;
   const merged = new Uint8Array(mergedLen);
   for (const { buffer, range: cr } of buffers) {
-    const partStart = Math.max(cr.start, range.start);
-    const partEnd = Math.min(cr.end, range.end);
+    const partStart = Math.max(cr.start, effectiveRange.start);
+    const partEnd = Math.min(cr.end, effectiveRange.end);
     if (partStart <= partEnd) {
       const srcOff = partStart - cr.start;
-      const dstOff = partStart - range.start;
+      const dstOff = partStart - effectiveRange.start;
       const len = partEnd - partStart + 1;
       merged.set(buffer.slice(srcOff, srcOff + len), dstOff);
     }
   }
 
-  return build206Response(merged.buffer, range, contentType, totalSize);
+  console.log(`[SW] cache merge HIT  ${effectiveRange.start}-${effectiveRange.end}`);
+  return build206Response(merged.buffer, effectiveRange, contentType, totalSize);
 }
 
 // ------------------------- CORS 安全响应包装 -------------------------
@@ -177,7 +196,7 @@ function withCors(response) {
   });
 }
 
-// ------------------------- 网络请求 + 后台缓存 -------------------------
+// ------------------------- 网络请求 + 同步缓存 -------------------------
 
 async function fetchAndCache(request, event) {
   // 不使用 event.request 直接 fetch：Safari 可能保留原始请求的 opaque/no-cors 模式，
@@ -191,49 +210,37 @@ async function fetchAndCache(request, event) {
   });
 
   // 只缓存 206 响应（分段请求），不缓存整文件（200）以免撑爆存储。
-  // 不要求请求必须有 Range：Safari 初始请求可能不带 Range，但 Worker 会补上并
-  // 返回 206，这个响应按实际 Content-Range 缓存即可。
-  // 也不要求请求 Range 与响应 Range 一致：Worker 会把大 Range 夹紧，实际
-  // Content-Range 才是 response body 的真实区间。
-  if (rawResponse.ok && rawResponse.status === 206 && event) {
+  if (rawResponse.ok && rawResponse.status === 206) {
     const actualRange = parseContentRange(rawResponse.headers.get('Content-Range'));
     if (actualRange) {
       const actualSize = actualRange.end - actualRange.start + 1;
-      // 缓存不超过 MAX_CACHE_SIZE（10MB）的 chunk，覆盖管理页 10MB 和分享页 2MB
       if (actualSize <= MAX_CACHE_SIZE) {
+        const cacheKey = `${url}|${actualRange.start}-${actualRange.end}`;
         const cloned = rawResponse.clone();
-        // 仅保留 serveFromCache 重建 206 所需的最小头集合：
-        // Content-Type → 构建 206 时设置
-        // X-Total-Size → 文件总大小
-        // Range 信息已在缓存 key URL（|start-end）中，无需额外存储。
         const cachedHeaders = new Headers();
         const ct = cloned.headers.get('Content-Type');
         if (ct) cachedHeaders.set('Content-Type', ct);
         if (actualRange.total) {
           cachedHeaders.set('X-Total-Size', String(actualRange.total));
         }
-        // Cache API 不允许存储 206，改为 200；
-        // serveFromCache 会从 buffer + key URL + X-Total-Size 重建 206
         const cachedResponse = new Response(cloned.body, {
           status: 200,
           statusText: 'OK',
           headers: cachedHeaders,
         });
-        event.waitUntil(
-          caches.open(VIDEO_CACHE).then(async (cache) => {
-            try {
-              await cache.put(`${url}|${actualRange.start}-${actualRange.end}`, cachedResponse);
-              // LRU 淘汰：超过上限则删除最早的条目
-              const keys = await cache.keys();
-              if (keys.length > MAX_CACHE_ENTRIES) {
-                const toDelete = keys.slice(0, keys.length - MAX_CACHE_ENTRIES);
-                await Promise.all(toDelete.map(k => cache.delete(k)));
-              }
-            } catch (e) {
-              console.warn('[SW] cache store failed:', e.message);
-            }
-          })
-        );
+        try {
+          const cache = await caches.open(VIDEO_CACHE);
+          await cache.put(cacheKey, cachedResponse);
+          console.log(`[SW] cache write OK: ${cacheKey}`);
+          // LRU 淘汰
+          const keys = await cache.keys();
+          if (keys.length > MAX_CACHE_ENTRIES) {
+            const toDelete = keys.slice(0, keys.length - MAX_CACHE_ENTRIES);
+            await Promise.all(toDelete.map(k => cache.delete(k)));
+          }
+        } catch (e) {
+          console.warn('[SW] cache write FAIL:', e.message);
+        }
       }
     }
   }
@@ -302,11 +309,8 @@ self.addEventListener('fetch', (event) => {
       if (!isPrefetch) {
         const range = parseRange(rangeHeader);
         if (range) {
-          const cached = await serveFromCache(url.href, range);
-          if (cached) {
-            console.log(`[SW] cache HIT  ${range.start}-${range.end}`);
-            return cached;
-          }
+          const cached = await serveFromCache(event.request.url, range);
+          if (cached) return cached;
           console.log(`[SW] cache MISS ${range.start}-${range.end}, fetching from network`);
         }
       }
