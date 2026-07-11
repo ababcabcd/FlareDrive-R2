@@ -757,12 +757,15 @@ export default {
 
     async deleteShare(shareId) {
       if (!confirm("确定要删除这个分享链接吗？")) return;
+      // 乐观移除：先从列表中去掉，避免 R2 list 一致性延迟导致已删项重现
+      this.shares = this.shares.filter(s => s.shareId !== shareId);
       try {
         await axios.delete(`/api/shares?shareId=${shareId}`);
-        await this.fetchShares();
       } catch (error) {
         console.error("Delete share error:", error);
         alert("删除分享链接失败");
+        // 删除失败则回滚：重新拉取完整列表
+        await this.fetchShares();
       }
     },
 
