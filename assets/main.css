@@ -286,3 +286,17 @@ button {
 .slide-up-leave-to {
   transform: translateY(100%);
 }
+
+.slide-down-enter-active {
+  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+}
+
+.slide-down-leave-active {
+  transition: transform 0.2s ease-in, opacity 0.2s ease-in;
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  transform: translateY(-10px);
+  opacity: 0;
+}
