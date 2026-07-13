@@ -16,7 +16,8 @@ const emit = defineEmits(["update:modelValue", "click"]);
       <div
         v-show="modelValue"
         class="menu-modal"
-        @click="emit('update:modelValue', false)"
+        @click.stop="emit('update:modelValue', false)"
+        @touchstart.prevent
       ></div>
     </Transition>
     <div v-show="modelValue" class="menu-content">
@@ -45,6 +46,7 @@ const emit = defineEmits(["update:modelValue", "click"]);
   height: 100%;
   background-color: rgba(0, 0, 0, 0.2);
   z-index: 1;
+  touch-action: none;
 }
 
 .menu-content {

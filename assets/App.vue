@@ -304,7 +304,7 @@
       </ul>
     </Dialog>
     <div style="flex:1"></div>
-    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false">
+    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false" @touchstart.prevent>
       <div class="share-modal" @click.stop>
         <div class="share-modal-header">
           <h3>分享文件</h3>
@@ -332,7 +332,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false">
+    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false" @touchstart.prevent>
       <div class="share-management-modal" @click.stop>
         <div class="share-modal-header">
           <h3>管理分享链接</h3>
@@ -1035,6 +1035,9 @@ export default {
 
     fetchFiles() {
       this.loading = true;
+      // 立即清空旧数据，防止进入新目录时旧列表短暂闪现
+      this.files = [];
+      this.folders = [];
       this.apiFetch(this.childrenUrl(this.cwd))
         .then((res) => {
           if (!res.ok) {
@@ -2204,6 +2207,7 @@ export default {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  touch-action: none;
 }
 
 .share-modal {

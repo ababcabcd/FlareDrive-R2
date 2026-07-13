@@ -11,9 +11,10 @@ const emit = defineEmits(["update:modelValue"]);
     <div
       v-if="modelValue"
       class="dialog-mask"
-      @click="emit('update:modelValue', false)"
+      @click.stop="emit('update:modelValue', false)"
+      @touchstart.prevent
     >
-      <div class="dialog-container">
+      <div class="dialog-container" @click.stop>
         <slot></slot>
       </div>
     </div>
@@ -32,6 +33,7 @@ const emit = defineEmits(["update:modelValue"]);
   display: flex;
   justify-content: center;
   align-items: center;
+  touch-action: none;
 }
 
 .dialog-container {
