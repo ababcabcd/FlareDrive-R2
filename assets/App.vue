@@ -170,10 +170,7 @@
           </button>
         </li>
         <li v-for="folder in filteredFolders" :key="folder">
-          <div tabindex="0" class="file-item" @click="cwd = folder" @contextmenu.prevent="
-            showContextMenu = true;
-          focusedItem = folder;
-          ">
+          <div tabindex="0" class="file-item" @click="cwd = folder">
             <div class="file-icon">
               <svg  viewBox="0 0 576 512"
                 xmlns="http://www.w3.org/2000/svg" width="36" height="36">
@@ -182,7 +179,7 @@
             </div>
             <div class="file-info-container"><span class="file-name" v-text="folder.match(/.*?([^/]*)\/?$/)[1]"></span>
             </div>
-            <div style="margin-right: 10px;margin-left: auto;" @click.stop="
+            <div style="display:flex;align-items:center;justify-content:center;min-width:64px;min-height:64px;margin-right:4px;margin-left:auto;flex-shrink:0;" @click.stop="
               showContextMenu = true;
             focusedItem = folder;
             ">
@@ -196,9 +193,7 @@
           </div>
         </li>
         <li v-for="file in filteredFiles" :key="file.key">
-          <div @click="preview(rawUrl(file.key), file.httpMetadata.contentType, file.key.split('/').pop())" @contextmenu.prevent="
-            showContextMenu = true;
-          focusedItem = file;" class="file-item" style="position: relative;">
+          <div @click="preview(rawUrl(file.key), file.httpMetadata.contentType, file.key.split('/').pop())" class="file-item" style="position: relative;">
             <MimeIcon :content-type="file.httpMetadata.contentType" :name="file.key.split('/').pop()"
               :thumbnail="file.customMetadata.thumbnail
                 ? `/raw/_$flaredrive$/thumbnails/${file.customMetadata.thumbnail}.png`
@@ -211,11 +206,11 @@
                 <span v-text="formatSize(file.size)"></span>
               </div>
             </div>
-            <div style="margin-right: 10px;margin-left: auto;" @click.stop="
+            <div style="display:flex;align-items:center;justify-content:center;min-width:64px;min-height:64px;margin-right:4px;margin-left:auto;flex-shrink:0;" @click.stop="
               showContextMenu = true;
             focusedItem = file;
             ">
-              <svg t="1741761103305" class="icon" viewBox="0 0 1024 1024" version="1.1"
+            <svg t="1741761103305" class="icon" viewBox="0 0 1024 1024" version="1.1"
                 xmlns="http://www.w3.org/2000/svg" p-id="6484" width="30" height="30">
                 <path
                   d="M341.333333 533.333333a128 128 0 0 1 128 128v149.333334a128 128 0 0 1-128 128H192a128 128 0 0 1-128-128v-149.333334a128 128 0 0 1 128-128h149.333333z m469.333334 0a128 128 0 0 1 128 128v149.333334a128 128 0 0 1-128 128h-149.333334a128 128 0 0 1-128-128v-149.333334a128 128 0 0 1 128-128h149.333334z m-469.333334 64H192a64 64 0 0 0-63.893333 60.245334L128 661.333333v149.333334a64 64 0 0 0 60.245333 63.893333L192 874.666667h149.333333a64 64 0 0 0 63.893334-60.245334L405.333333 810.666667v-149.333334a64 64 0 0 0-60.245333-63.893333L341.333333 597.333333z m469.333334 0h-149.333334a64 64 0 0 0-63.893333 60.245334L597.333333 661.333333v149.333334a64 64 0 0 0 60.245334 63.893333L661.333333 874.666667h149.333334a64 64 0 0 0 63.893333-60.245334L874.666667 810.666667v-149.333334a64 64 0 0 0-60.245334-63.893333L810.666667 597.333333zM341.333333 64a128 128 0 0 1 128 128v149.333333a128 128 0 0 1-128 128H192a128 128 0 0 1-128-128V192a128 128 0 0 1 128-128h149.333333z m469.333334 0a128 128 0 0 1 128 128v149.333333a128 128 0 0 1-128 128h-149.333334a128 128 0 0 1-128-128V192a128 128 0 0 1 128-128h149.333334zM341.333333 128H192a64 64 0 0 0-63.893333 60.245333L128 192v149.333333a64 64 0 0 0 60.245333 63.893334L192 405.333333h149.333333a64 64 0 0 0 63.893334-60.245333L405.333333 341.333333V192a64 64 0 0 0-60.245333-63.893333L341.333333 128z m469.333334 0h-149.333334a64 64 0 0 0-63.893333 60.245333L597.333333 192v149.333333a64 64 0 0 0 60.245334 63.893334L661.333333 405.333333h149.333334a64 64 0 0 0 63.893333-60.245333L874.666667 341.333333V192a64 64 0 0 0-60.245334-63.893333L810.666667 128z"
@@ -277,11 +272,6 @@
           </button>
         </li>
         <li>
-          <button @click.stop="clipboard = focusedItem.key; showContextMenu = false">
-            <span>复制</span>
-          </button>
-        </li>
-        <li>
           <button @click.stop="moveFile(focusedItem.key); showContextMenu = false">
             <span>移动</span>
           </button>
@@ -304,8 +294,8 @@
       </ul>
     </Dialog>
     <div style="flex:1"></div>
-    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false" @touchstart.stop>
-      <div class="share-modal" @click.stop>
+    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false" @touchend.prevent.stop="showShareModal = false" @touchstart.stop>
+      <div class="share-modal" @click.stop @touchend.stop>
         <div class="share-modal-header">
           <h3>分享文件</h3>
           <button class="close-btn" @click="showShareModal = false">×</button>
@@ -332,8 +322,8 @@
         </div>
       </div>
     </div>
-    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false" @touchstart.stop>
-      <div class="share-management-modal" @click.stop>
+    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false" @touchend.prevent.stop="showShareManagement = false" @touchstart.stop>
+      <div class="share-management-modal" @click.stop @touchend.stop>
         <div class="share-modal-header">
           <h3>管理分享链接</h3>
           <button class="close-btn" @click="showShareManagement = false">×</button>

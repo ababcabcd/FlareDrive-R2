@@ -17,10 +17,11 @@ const emit = defineEmits(["update:modelValue", "click"]);
         v-show="modelValue"
         class="menu-modal"
         @click.stop="emit('update:modelValue', false)"
+        @touchend.prevent.stop="emit('update:modelValue', false)"
         @touchstart.stop
       ></div>
     </Transition>
-    <div v-show="modelValue" class="menu-content">
+    <div v-show="modelValue" class="menu-content" @touchend.stop>
       <ul>
         <li
           v-for="(item, index) in items"
