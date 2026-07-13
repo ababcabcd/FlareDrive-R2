@@ -515,7 +515,7 @@ export async function onRequestGet(context) {
     }
 
     function copyLink() {
-      var url = fileUrl + '&dl=1';
+      var url = location.origin + fileUrl + '&dl=1';
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(function() {
           alert('下载链接已复制到粘贴板');
