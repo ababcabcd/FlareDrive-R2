@@ -246,6 +246,7 @@ button.circle {
   transition: background-color 0.2s ease-in-out;
   font-size: inherit;
   justify-content: center;
+  color: #1a73e8;
 }
 
 .contextmenu-list > li > *:hover {
