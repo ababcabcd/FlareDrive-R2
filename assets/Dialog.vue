@@ -12,7 +12,7 @@ const emit = defineEmits(["update:modelValue"]);
       v-if="modelValue"
       class="dialog-mask"
       @click.stop="emit('update:modelValue', false)"
-      @touchstart.prevent
+      @touchstart.stop
     >
       <div class="dialog-container" @click.stop>
         <slot></slot>

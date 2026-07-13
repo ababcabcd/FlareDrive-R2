@@ -304,7 +304,7 @@
       </ul>
     </Dialog>
     <div style="flex:1"></div>
-    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false" @touchstart.prevent>
+    <div v-if="showShareModal" class="share-modal-overlay" @click="showShareModal = false" @touchstart.stop>
       <div class="share-modal" @click.stop>
         <div class="share-modal-header">
           <h3>分享文件</h3>
@@ -332,7 +332,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false" @touchstart.prevent>
+    <div v-if="showShareManagement" class="share-modal-overlay" @click="showShareManagement = false" @touchstart.stop>
       <div class="share-management-modal" @click.stop>
         <div class="share-modal-header">
           <h3>管理分享链接</h3>

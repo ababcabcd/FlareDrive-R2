@@ -17,7 +17,7 @@ const emit = defineEmits(["update:modelValue", "click"]);
         v-show="modelValue"
         class="menu-modal"
         @click.stop="emit('update:modelValue', false)"
-        @touchstart.prevent
+        @touchstart.stop
       ></div>
     </Transition>
     <div v-show="modelValue" class="menu-content">
