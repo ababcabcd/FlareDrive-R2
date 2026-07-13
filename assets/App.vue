@@ -839,12 +839,12 @@ export default {
         contentType = head.headers.get('Content-Type') || contentType;
       } catch (e) {
         console.error('HEAD 失败，回退到原生下载', e);
-        window.open(url, '_blank');
+        window.open(url + '&dl=1', '_blank');
         return;
       }
       // 小文件直接原生下载即可
       if (!total || total < 1024 * 1024) {
-        window.open(url, '_blank');
+        window.open(url + '&dl=1', '_blank');
         return;
       }
 
@@ -865,7 +865,7 @@ export default {
       const SAFE_LIMIT = 1.5 * 1024 * 1024 * 1024;
       if (!writable && total > SAFE_LIMIT) {
         this.showToast('文件过大，浏览器内存受限，已改用原生下载');
-        window.open(url, '_blank');
+        window.open(url + '&dl=1', '_blank');
         return;
       }
 
@@ -972,7 +972,7 @@ export default {
         } else {
           console.error('多线程下载失败', e);
           this.showToast('多线程下载失败，已回退到原生下载');
-          window.open(url, '_blank');
+          window.open(url + '&dl=1', '_blank');
         }
         if (writable) { try { await writable.close(); } catch (_) {} }
       } finally {

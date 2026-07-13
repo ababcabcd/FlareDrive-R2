@@ -99,9 +99,9 @@ function buildCorsHeaders(): Headers {
 }
 
 // RFC 5987 编码 Content-Disposition 文件名，支持中文/特殊字符
-function encodeContentDisposition(fileName: string): string {
+function encodeContentDisposition(fileName: string, disposition: 'inline' | 'attachment' = 'inline'): string {
   const encoded = encodeURIComponent(fileName);
-  return `inline; filename="${fileName}"; filename*=UTF-8''${encoded}`;
+  return `${disposition}; filename="${fileName}"; filename*=UTF-8''${encoded}`;
 }
 
 // 鉴权检查的公共逻辑
@@ -230,10 +230,12 @@ export async function onRequestGet(context: any) {
   // 设置 Content-Disposition 以便浏览器下载时使用正确的文件名
   // （URL 路径中的 _fd_ 占位段不含真实文件名，浏览器会错误地使用 _fd_ 作为文件名）
   // 注意：视频/音频流式请求不设置，避免影响播放器内联解析 Range 响应。
-  if (effectivePath && !effectivePath.startsWith("_$flaredrive$/thumbnails/") && !isMediaRequest) {
+  // 显式下载请求（?dl=1）强制设置 attachment，确保浏览器/下载工具正确保存文件名。
+  const isDownload = requestUrl.searchParams.get("dl") === "1";
+  if (effectivePath && !effectivePath.startsWith("_$flaredrive$/thumbnails/") && (isDownload || !isMediaRequest)) {
     const fileName = effectivePath.split('/').pop();
     if (fileName) {
-      headers.set("Content-Disposition", encodeContentDisposition(fileName));
+      headers.set("Content-Disposition", encodeContentDisposition(fileName, isDownload && isMediaRequest ? 'attachment' : 'inline'));
     }
   }
 

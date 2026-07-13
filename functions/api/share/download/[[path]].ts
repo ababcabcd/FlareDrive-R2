@@ -326,7 +326,9 @@ export async function onRequestGet(context: any) {
     }
 
     // 视频/音频流式请求不设置 Content-Disposition，避免影响播放器内联解析 Range 响应
-    if (!isMediaRequest) {
+    // 但显式下载请求（?dl=1）强制设置 attachment，确保浏览器/下载工具正确保存文件名
+    const isDownload = url.searchParams.get("dl") === "1";
+    if (isDownload || !isMediaRequest) {
       if (fileName) {
         headers.set("Content-Disposition", encodeContentDisposition(fileName));
       }

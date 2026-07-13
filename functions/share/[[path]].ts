@@ -154,7 +154,8 @@ export async function onRequestGet(context) {
       gap: 12px;
     }
     
-    .container.media .download-btn {
+    .container.media .download-btn,
+    .container.media .copy-btn {
       flex: 0 0 auto;
     }
     
@@ -181,6 +182,34 @@ export async function onRequestGet(context) {
     }
     
     .download-btn:active {
+      transform: translateY(0);
+    }
+    
+    .copy-btn {
+      padding: 14px 24px;
+      background: white;
+      color: #667eea;
+      border: 2px solid #667eea;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    
+    .copy-btn:hover {
+      background: #667eea;
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+    }
+    
+    .copy-btn:active {
       transform: translateY(0);
     }
     
@@ -437,9 +466,14 @@ export async function onRequestGet(context) {
               '<div><span class="file-label">文件名</span><span class="file-value">' + data.fileName + '</span></div>' +
               '<div><span class="file-label">文件大小</span><span class="file-value">' + formatSize(data.size) + '</span></div>' +
             '</div>' +
-            '<button class="download-btn" onclick="downloadFile()">' +
-              '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
-            '</button>';
+            '<div class="btn-row">' +
+              '<button class="download-btn" onclick="downloadFile()">' +
+                '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
+              '</button>' +
+              '<button class="copy-btn" onclick="copyLink()">' +
+                '<span class="btn-icon">📋</span><span>复制链接</span>' +
+              '</button>' +
+            '</div>';
           // 视频预取：只在用户主动点击视频后才启动（click once），
           // autoplay 不应触发预取，避免浪费带宽和 R2 请求。
           if (isVideo(data.contentType)) {
@@ -457,9 +491,14 @@ export async function onRequestGet(context) {
               '<div><span class="file-label">文件名</span><span class="file-value">' + data.fileName + '</span></div>' +
               '<div><span class="file-label">文件大小</span><span class="file-value">' + formatSize(data.size) + '</span></div>' +
             '</div>' +
-            '<button class="download-btn" onclick="downloadFile()">' +
-              '<span class="btn-icon">⬇️</span><span>下载文件</span>' +
-            '</button>';
+            '<div class="btn-row">' +
+              '<button class="download-btn" onclick="downloadFile()">' +
+                '<span class="btn-icon">⬇️</span><span>下载文件</span>' +
+              '</button>' +
+              '<button class="copy-btn" onclick="copyLink()">' +
+                '<span class="btn-icon">📋</span><span>复制链接</span>' +
+              '</button>' +
+            '</div>';
         }
       } else {
         app.innerHTML = 
@@ -473,6 +512,19 @@ export async function onRequestGet(context) {
     function downloadFile() {
       // 优先网页内多线程下载；不支持流式落盘(Firefox/Safari)或小文件时回退原生单线程
       multiThreadDownload();
+    }
+
+    function copyLink() {
+      var url = fileUrl + '&dl=1';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(function() {
+          alert('下载链接已复制到粘贴板');
+        }).catch(function() {
+          prompt('复制失败，请手动复制:', url);
+        });
+      } else {
+        prompt('请手动复制链接:', url);
+      }
     }
 
     var _dl = { active: false, ctrl: null, writable: null };
@@ -499,13 +551,13 @@ export async function onRequestGet(context) {
       // 1) HEAD 拿大小（不计）
       var head;
       try { head = await fetch(fileUrl, { method: 'HEAD' }); }
-      catch (e) { window.location.href = fileUrl; return; }
+      catch (e) { window.location.href = fileUrl + '&dl=1'; return; }
       var total = parseInt(head.headers.get('Content-Length') || '0', 10);
       var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
       // 小文件或不支持 File System Access：原生下载（计一次数）
       if (!total || total < 1024 * 1024 || typeof window.showSaveFilePicker !== 'function') {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
-        window.location.href = fileUrl;
+        window.location.href = fileUrl + '&dl=1';
         return;
       }
       var writable = null;
@@ -515,7 +567,7 @@ export async function onRequestGet(context) {
       } catch (e) {
         if (e && e.name === 'AbortError') return; // 用户取消保存：不计下载数
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
-        window.location.href = fileUrl; return;
+        window.location.href = fileUrl + '&dl=1'; return;
       }
       // 开始下载：计一次数
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
@@ -569,7 +621,7 @@ export async function onRequestGet(context) {
         setTimeout(hideDlProgress, 800);
       } catch (e) {
         if (_dl.ctrl.signal.aborted) showDlProgress(0, '已取消下载');
-        else { console.error('多线程下载失败', e); try { await writable.close(); } catch (_) {} window.location.href = fileUrl; }
+        else { console.error('多线程下载失败', e); try { await writable.close(); } catch (_) {} window.location.href = fileUrl + '&dl=1'; }
       } finally { _dl.active = false; }
     }
     
