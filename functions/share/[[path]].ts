@@ -769,8 +769,12 @@ export async function onRequestGet(context) {
           '<code>caddy trust</code>' +
           '<p class="hint">将 Caddy 自签 CA 加入系统信任，避免浏览器证书警告</p>' +
           '<h4>3. 设为开机自启（macOS）</h4>' +
-          '<code style="white-space:pre-wrap;font-size:11px">cat > ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist << EOF\n&lt;?xml version="1.0" encoding="UTF-8"?&gt;\n&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;\n&lt;plist version="1.0"&gt;\n&lt;dict&gt;\n    &lt;key&gt;Label&lt;/key&gt;\n    &lt;string&gt;com.flaredrive.aria2-proxy&lt;/string&gt;\n    &lt;key&gt;ProgramArguments&lt;/key&gt;\n    &lt;array&gt;\n        &lt;string&gt;{CADDY_PATH}&lt;/string&gt;\n        &lt;string&gt;reverse-proxy&lt;/string&gt;\n        &lt;string&gt;--from&lt;/string&gt;\n        &lt;string&gt;https://localhost:16801&lt;/string&gt;\n        &lt;string&gt;--to&lt;/string&gt;\n        &lt;string&gt;http://localhost:16800&lt;/string&gt;\n    &lt;/array&gt;\n    &lt;key&gt;RunAtLoad&lt;/key&gt;\n    &lt;true/&gt;\n    &lt;key&gt;KeepAlive&lt;/key&gt;\n    &lt;true/&gt;\n&lt;/dict&gt;\n&lt;/plist&gt;\nEOF\nlaunchctl load ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist</code>' +
-          '<p class="hint">先执行 <code style="display:inline;padding:2px 4px;margin:0;font-size:11px">which caddy</code> 查看路径，替换上方 {CADDY_PATH}。一键创建并加载，重启后自动运行。<br>管理：<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl unload ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist</code> 停止，<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl load ...</code> 重新加载。</p>' +
+          '<code>which caddy</code>' +
+          '<code>cat > ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist <<-EOF</code>' +
+          '<code>  ...（plist 内容，参考下方模板）...</code>' +
+          '<code>EOF</code>' +
+          '<code>launchctl load ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist</code>' +
+          '<p class="hint">plist 模板：Label = com.flaredrive.aria2-proxy，ProgramArguments = [{CADDY_PATH}, reverse-proxy, --from, https://localhost:16801, --to, http://localhost:16800]，RunAtLoad + KeepAlive = true。用 <code style="display:inline;padding:2px 4px;margin:0;font-size:11px">which caddy</code> 查路径替换 {CADDY_PATH}。<br>管理：<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl unload ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist</code> 停止，<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl load ...</code> 重新加载。</p>' +
           '<h4>4. 在此页面配置</h4>' +
           '<p class="hint">协议选 <b>HTTPS</b>，主机 <b>localhost</b>，端口 <b>16801</b>，填入 Motrix 的 RPC 密钥</p>' +
         '</div>' +
