@@ -761,7 +761,7 @@ export async function onRequestGet(context) {
         '<div class="field"><label>RPC 主机</label><input id="aria2Host" value="' + s.host + '" placeholder="localhost"></div>' +
         '<div class="field"><label>RPC 端口</label><input id="aria2Port" type="number" value="' + s.port + '" placeholder="16800"></div>' +
         '<div class="field"><label>RPC 密钥</label><input id="aria2Secret" type="password" value="' + s.secret + '" placeholder="（可选）"><div class="hint">留空表示无密钥</div></div>' +
-        '<button class="aria2-help-toggle" onclick="var c=this.nextElementSibling;c.style.display=c.style.display===\'none\'?\'block\':\'none\'">📖 Motrix / HTTP Aria2 如何连接？</button>' +
+        '<button class="aria2-help-toggle" onclick="toggleAria2Help(this)">📖 Motrix / HTTP Aria2 如何连接？</button>' +
         '<div class="aria2-help-content" style="display:none">' +
           '<h4>1. 安装 Caddy（macOS）</h4>' +
           '<code>brew install caddy</code>' +
@@ -784,6 +784,11 @@ export async function onRequestGet(context) {
       '</div>';
       document.body.appendChild(overlay);
       overlay.addEventListener('click', function(e) { if (e.target === overlay) hideAria2Settings(); });
+    }
+
+    function toggleAria2Help(btn) {
+      var c = btn.nextElementSibling;
+      if (c) c.style.display = c.style.display === 'none' ? 'block' : 'none';
     }
 
     function hideAria2Settings() {
