@@ -359,6 +359,33 @@ export async function onRequestGet(context) {
       user-select: all;
     }
     
+    .code-wrap {
+      position: relative;
+      margin: 4px 0;
+    }
+    .code-wrap code {
+      padding-right: 42px;
+    }
+    .copy-code-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      color: #9ca3af;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 8px;
+      line-height: 1.4;
+      transition: all .2s;
+      user-select: none;
+    }
+    .copy-code-btn:hover {
+      background: rgba(255,255,255,.18);
+      color: #fff;
+    }
+    
     .aria2-help-content .hint {
       font-size: 12px;
       color: #9ca3af;
@@ -615,6 +642,7 @@ export async function onRequestGet(context) {
     }
     
     async function validateShare() {
+      try {
       var response = await fetch('/api/share/?token=' + token);
       var data = await response.json();
       
@@ -702,6 +730,13 @@ export async function onRequestGet(context) {
           '<div class="error-box"><p>' + data.message + '</p></div>' +
           '<button class="download-btn expired" disabled><span>链接已失效</span></button>';
       }
+      } catch (e) {
+        document.getElementById('app').innerHTML =
+          '<div class="icon error-icon">❌</div>' +
+          '<h1>网络请求失败</h1>' +
+          '<div class="error-box"><p>无法连接到服务器，请检查网络后刷新页面重试</p></div>' +
+          '<button class="download-btn" onclick="location.reload()"><span>重新加载</span></button>';
+      }
     }
     
     function downloadFile() {
@@ -763,18 +798,16 @@ export async function onRequestGet(context) {
         '<button class="aria2-help-toggle" onclick="toggleAria2Help(this)">📖 Motrix / HTTP Aria2 如何连接？</button>' +
         '<div class="aria2-help-content" style="display:none">' +
           '<h4>1. 安装 Caddy（macOS）</h4>' +
-          '<code>brew install caddy</code>' +
+          '<div class="code-wrap"><code>brew install caddy</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
           '<p class="hint">其他系统：<a href="https://caddyserver.com/download" target="_blank">caddyserver.com/download</a></p>' +
           '<h4>2. 信任证书（首次）</h4>' +
-          '<code>caddy trust</code>' +
+          '<div class="code-wrap"><code>caddy trust</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
           '<p class="hint">将 Caddy 自签 CA 加入系统信任，避免浏览器证书警告</p>' +
           '<h4>3. 设为开机自启（macOS）</h4>' +
-          '<code>which caddy</code>' +
-          '<code>cat > ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist <<-EOF</code>' +
-          '<code>  ...（plist 内容，参考下方模板）...</code>' +
-          '<code>EOF</code>' +
-          '<code>launchctl load ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist</code>' +
-          '<p class="hint">plist 模板：Label = com.flaredrive.aria2-proxy，ProgramArguments = [{CADDY_PATH}, reverse-proxy, --from, https://localhost:16801, --to, http://localhost:16800]，RunAtLoad + KeepAlive = true。用 <code style="display:inline;padding:2px 4px;margin:0;font-size:11px">which caddy</code> 查路径替换 {CADDY_PATH}。<br>管理：<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl unload ~/Library/LaunchAgents/com.flaredrive.aria2-proxy.plist</code> 停止，<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl load ...</code> 重新加载。</p>' +
+          '<div class="code-wrap"><code>which caddy</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
+          '<div class="code-wrap"><code style="white-space:pre-wrap">cat > ~/Library/LaunchAgents/com.aria2-proxy.plist << \'EOF\'<br>&lt;?xml version="1.0" encoding="UTF-8"?&gt;<br>&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;<br>&lt;plist version="1.0"&gt;<br>&lt;dict&gt;<br>    &lt;key&gt;Label&lt;/key&gt;<br>    &lt;string&gt;com.aria2-proxy&lt;/string&gt;<br>    &lt;key&gt;ProgramArguments&lt;/key&gt;<br>    &lt;array&gt;<br>        &lt;string&gt;{CADDY_PATH}&lt;/string&gt;<br>        &lt;string&gt;reverse-proxy&lt;/string&gt;<br>        &lt;string&gt;--from&lt;/string&gt;<br>        &lt;string&gt;https://localhost:16801&lt;/string&gt;<br>        &lt;string&gt;--to&lt;/string&gt;<br>        &lt;string&gt;http://localhost:16800&lt;/string&gt;<br>    &lt;/array&gt;<br>    &lt;key&gt;RunAtLoad&lt;/key&gt;<br>    &lt;true/&gt;<br>    &lt;key&gt;KeepAlive&lt;/key&gt;<br>    &lt;true/&gt;<br>&lt;/dict&gt;<br>&lt;/plist&gt;<br>EOF</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
+          '<div class="code-wrap"><code>launchctl load ~/Library/LaunchAgents/com.aria2-proxy.plist</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
+          '<p class="hint">用 <code style="display:inline;padding:2px 4px;margin:0;font-size:11px">which caddy</code> 查路径替换 {CADDY_PATH}。<br>管理：<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl unload ~/Library/LaunchAgents/com.aria2-proxy.plist</code> 停止，<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl load ...</code> 重新加载。</p>' +
           '<h4>4. 在此页面配置</h4>' +
           '<p class="hint">协议选 <b>HTTPS</b>，主机 <b>localhost</b>，端口 <b>16801</b>，填入 Motrix 的 RPC 密钥</p>' +
         '</div>' +
@@ -790,6 +823,22 @@ export async function onRequestGet(context) {
     function toggleAria2Help(btn) {
       var c = btn.nextElementSibling;
       if (c) c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function copyCode(btn) {
+      var code = btn.parentElement.querySelector('code');
+      var text = code.innerHTML
+        .replace(/<br\s*\/?>/gi, '\\n')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'");
+      navigator.clipboard.writeText(text).then(function() {
+        var orig = btn.textContent;
+        btn.textContent = '已复制';
+        setTimeout(function() { btn.textContent = orig; }, 1500);
+      });
     }
 
     function hideAria2Settings() {
