@@ -452,6 +452,44 @@ export async function onRequestGet(context) {
     <p>正在检查链接有效性，请稍候</p>
   </div>
   
+  <template id="aria2Tutorial">
+    <h4>1. 安装 Caddy（macOS）</h4>
+    <div class="code-wrap"><code>brew install caddy</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>
+    <p class="hint">其他系统：<a href="https://caddyserver.com/download" target="_blank">caddyserver.com/download</a></p>
+    <h4>2. 信任证书（首次）</h4>
+    <div class="code-wrap"><code>caddy trust</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>
+    <p class="hint">将 Caddy 自签 CA 加入系统信任，避免浏览器证书警告</p>
+    <h4>3. 设为开机自启（macOS）</h4>
+    <div class="code-wrap"><code>which caddy</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>
+    <div class="code-wrap"><code style="white-space:pre-wrap">cat &gt; ~/Library/LaunchAgents/com.aria2-proxy.plist &lt;&lt; EOF
+	&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;
+	&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;
+	&lt;plist version=&quot;1.0&quot;&gt;
+	&lt;dict&gt;
+	    &lt;key&gt;Label&lt;/key&gt;
+	    &lt;string&gt;com.aria2-proxy&lt;/string&gt;
+	    &lt;key&gt;ProgramArguments&lt;/key&gt;
+	    &lt;array&gt;
+	        &lt;string&gt;{CADDY_PATH}&lt;/string&gt;
+	        &lt;string&gt;reverse-proxy&lt;/string&gt;
+	        &lt;string&gt;--from&lt;/string&gt;
+	        &lt;string&gt;https://localhost:16801&lt;/string&gt;
+	        &lt;string&gt;--to&lt;/string&gt;
+	        &lt;string&gt;http://localhost:16800&lt;/string&gt;
+	    &lt;/array&gt;
+	    &lt;key&gt;RunAtLoad&lt;/key&gt;
+	    &lt;true/&gt;
+	    &lt;key&gt;KeepAlive&lt;/key&gt;
+	    &lt;true/&gt;
+	&lt;/dict&gt;
+	&lt;/plist&gt;
+	EOF</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>
+    <div class="code-wrap"><code>launchctl load ~/Library/LaunchAgents/com.aria2-proxy.plist</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>
+    <p class="hint">用 <code style="display:inline;padding:2px 4px;margin:0;font-size:11px">which caddy</code> 查路径替换 {CADDY_PATH}。<br>管理：<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl unload ~/Library/LaunchAgents/com.aria2-proxy.plist</code> 停止，<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl load ...</code> 重新加载。</p>
+    <h4>4. 在此页面配置</h4>
+    <p class="hint">协议选 <b>HTTPS</b>，主机 <b>localhost</b>，端口 <b>16801</b>，填入 Motrix 的 RPC 密钥</p>
+  </template>
+
   <script>
     var token = "${token}";
     var fileUrl = '/api/share/download/?token=' + token;
@@ -796,27 +834,18 @@ export async function onRequestGet(context) {
         '<div class="field"><label>RPC 端口</label><input id="aria2Port" type="number" value="' + s.port + '" placeholder="16800"></div>' +
         '<div class="field"><label>RPC 密钥</label><input id="aria2Secret" type="password" value="' + s.secret + '" placeholder="（可选）"><div class="hint">留空表示无密钥</div></div>' +
         '<button class="aria2-help-toggle" onclick="toggleAria2Help(this)">📖 Motrix / HTTP Aria2 如何连接？</button>' +
-        '<div class="aria2-help-content" style="display:none">' +
-          '<h4>1. 安装 Caddy（macOS）</h4>' +
-          '<div class="code-wrap"><code>brew install caddy</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
-          '<p class="hint">其他系统：<a href="https://caddyserver.com/download" target="_blank">caddyserver.com/download</a></p>' +
-          '<h4>2. 信任证书（首次）</h4>' +
-          '<div class="code-wrap"><code>caddy trust</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
-          '<p class="hint">将 Caddy 自签 CA 加入系统信任，避免浏览器证书警告</p>' +
-          '<h4>3. 设为开机自启（macOS）</h4>' +
-          '<div class="code-wrap"><code>which caddy</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
-          '<div class="code-wrap"><code style="white-space:pre-wrap">cat > ~/Library/LaunchAgents/com.aria2-proxy.plist << EOF<br>&lt;?xml version="1.0" encoding="UTF-8"?&gt;<br>&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;<br>&lt;plist version="1.0"&gt;<br>&lt;dict&gt;<br>    &lt;key&gt;Label&lt;/key&gt;<br>    &lt;string&gt;com.aria2-proxy&lt;/string&gt;<br>    &lt;key&gt;ProgramArguments&lt;/key&gt;<br>    &lt;array&gt;<br>        &lt;string&gt;{CADDY_PATH}&lt;/string&gt;<br>        &lt;string&gt;reverse-proxy&lt;/string&gt;<br>        &lt;string&gt;--from&lt;/string&gt;<br>        &lt;string&gt;https://localhost:16801&lt;/string&gt;<br>        &lt;string&gt;--to&lt;/string&gt;<br>        &lt;string&gt;http://localhost:16800&lt;/string&gt;<br>    &lt;/array&gt;<br>    &lt;key&gt;RunAtLoad&lt;/key&gt;<br>    &lt;true/&gt;<br>    &lt;key&gt;KeepAlive&lt;/key&gt;<br>    &lt;true/&gt;<br>&lt;/dict&gt;<br>&lt;/plist&gt;<br>EOF</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
-          '<div class="code-wrap"><code>launchctl load ~/Library/LaunchAgents/com.aria2-proxy.plist</code><button class="copy-code-btn" onclick="copyCode(this)">📋</button></div>' +
-          '<p class="hint">用 <code style="display:inline;padding:2px 4px;margin:0;font-size:11px">which caddy</code> 查路径替换 {CADDY_PATH}。<br>管理：<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl unload ~/Library/LaunchAgents/com.aria2-proxy.plist</code> 停止，<code style="display:inline;padding:2px 4px;margin:0;font-size:11px">launchctl load ...</code> 重新加载。</p>' +
-          '<h4>4. 在此页面配置</h4>' +
-          '<p class="hint">协议选 <b>HTTPS</b>，主机 <b>localhost</b>，端口 <b>16801</b>，填入 Motrix 的 RPC 密钥</p>' +
-        '</div>' +
+        '<div class="aria2-help-content" style="display:none"></div>' +
         '<div class="btn-row" style="margin-top:8px">' +
           '<button class="copy-btn" onclick="hideAria2Settings()" style="flex:1">取消</button>' +
           '<button class="download-btn" onclick="saveAria2Config()" style="flex:1;margin-left:8px">保存</button>' +
         '</div>' +
       '</div>';
       document.body.appendChild(overlay);
+      var tpl = document.getElementById('aria2Tutorial');
+      var helpDiv = overlay.querySelector('.aria2-help-content');
+      if (tpl && helpDiv) {
+        helpDiv.appendChild(tpl.content.cloneNode(true));
+      }
       overlay.addEventListener('mousedown', function(e) { if (e.target === overlay) hideAria2Settings(); });
     }
 
@@ -827,14 +856,7 @@ export async function onRequestGet(context) {
 
     function copyCode(btn) {
       var code = btn.parentElement.querySelector('code');
-      var text = code.innerHTML
-        .replace(/<br\s*\/?>/gi, '\\n')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'");
-      navigator.clipboard.writeText(text).then(function() {
+      navigator.clipboard.writeText(code.textContent || '').then(function() {
         var orig = btn.textContent;
         btn.textContent = '已复制';
         setTimeout(function() { btn.textContent = orig; }, 1500);
