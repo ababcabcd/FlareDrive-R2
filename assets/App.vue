@@ -818,9 +818,12 @@ export default {
     },
 
     // 网页内多线程（分块 Range）下载：
-    // 1) HEAD 拿文件大小/类型；2) 按大小决定线程数(2-8)；
-    // 3) 优先用 File System Access API 流式落盘（大文件不占满内存），
+    // 1) HEAD(?direct=1) 拿文件大小/类型 + R2 公开 URL；2) 按大小决定线程数(2-8)；
+    // 3) 分块并行拉取，直连 R2 CDN 边缘节点；
+    // 4) 优先用 File System Access API 流式落盘（大文件不占满内存），
     //    不支持时回退为合并 Blob 触发下载；超大文件回退原生单线程下载。
+    // 直连 R2 绕过 Worker 代理延迟和 Service Worker 拦截，速度与 aria2 相近。
+    // R2 无 CORS 或直连失败时自动回退 Worker 代理。
     async multiThreadDownload(key, displayName) {
       if (this.downloadProgress !== null) {
         this.showToast('已有下载任务进行中');
@@ -830,13 +833,15 @@ export default {
       const authHeaders = token ? { 'X-Flare-Auth': token } : {};
       const url = this.rawUrl(key);
 
-      // 1) HEAD 获取文件大小与类型
+      // 1) HEAD 获取文件大小、类型与 R2 直连 URL
       let total = 0;
       let contentType = 'application/octet-stream';
+      let directUrl = null;
       try {
-        const head = await this.apiFetch(url, { method: 'HEAD' });
+        const head = await this.apiFetch(url + '&direct=1', { method: 'HEAD' });
         total = parseInt(head.headers.get('Content-Length') || '0', 10);
         contentType = head.headers.get('Content-Type') || contentType;
+        directUrl = head.headers.get('X-Direct-Url');
       } catch (e) {
         console.error('HEAD 失败，回退到原生下载', e);
         window.open(url + '&dl=1', '_blank');
@@ -869,7 +874,8 @@ export default {
         return;
       }
 
-      // 3) 分块
+      // 3) 分块 — 使用直连 URL（绕过 Worker/SW），不可用时回退 Worker 代理
+      const fetchUrl = directUrl || url;
       const threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
@@ -896,11 +902,19 @@ export default {
       };
 
       const worker = async (r) => {
-        const res = await this.apiFetch(url, {
+        let res = await fetch(fetchUrl, {
           method: 'GET',
-          headers: { ...authHeaders, Range: `bytes=${r.start}-${r.end}` },
+          headers: { Range: `bytes=${r.start}-${r.end}` },
           signal: ctrl.signal,
         });
+        // 直连失败（如 R2 未配 CORS）→ 回退 Worker 代理
+        if (!res.ok && fetchUrl !== url) {
+          res = await this.apiFetch(url, {
+            method: 'GET',
+            headers: { ...authHeaders, Range: `bytes=${r.start}-${r.end}` },
+            signal: ctrl.signal,
+          });
+        }
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${r.index} 返回 ${res.status}`);
         }

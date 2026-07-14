@@ -160,6 +160,13 @@ export async function onRequestHead(context: any) {
   const corsHeaders = buildCorsHeaders();
   corsHeaders.forEach((v, k) => headers.set(k, v));
 
+  // 直连下载：返回 R2 公开 URL，让浏览器绕过 Worker 代理/SW 直接分块下载
+  const reqUrl = new URL(context.request.url);
+  if (reqUrl.searchParams.get("direct") === "1" && context.env?.["PUBURL"]) {
+    headers.set("X-Direct-Url", url);
+    corsHeaders.set("Access-Control-Expose-Headers", `Content-Range, Accept-Ranges, Content-Length, Content-Type, X-Direct-Url`);
+  }
+
   // 兜底：修正 R2 未识别的 MIME 类型
   fixContentType(headers, effectivePath);
 

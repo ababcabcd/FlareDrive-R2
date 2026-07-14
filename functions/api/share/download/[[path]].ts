@@ -215,9 +215,17 @@ export async function onRequestHead(context: any) {
     headers.set("Accept-Ranges", "bytes");
     headers.set("Cache-Control", "no-cache");
 
+    // 直连下载：返回 R2 公开 URL，让浏览器绕过 Worker 代理/SW 直接分块下载
+    if (url.searchParams.get("direct") === "1" && context.env?.["PUBURL"]) {
+      const pubUrl = new URL(metadata.key, context.env["PUBURL"]).href;
+      headers.set("X-Direct-Url", pubUrl);
+    }
+
     // 合并 CORS 头
     const corsHeaders = buildCorsHeaders();
     corsHeaders.forEach((v, k) => headers.set(k, v));
+    // 确保 X-Direct-Url 也能被 JS 读到
+    corsHeaders.set("Access-Control-Expose-Headers", `Content-Range, Accept-Ranges, Content-Length, Content-Type, X-Direct-Url`);
 
     return new Response(null, { status: 200, headers });
   } catch (e: any) {

@@ -949,17 +949,21 @@ export async function onRequestGet(context) {
     }
     function hideDlProgress() { var el = document.getElementById('dlProgress'); if (el) el.style.display = 'none'; }
 
-    // 网页内多线程（分块 Range）下载：HEAD 拿大小，并行拉取多区间。
-    // 优先 File System Access API 流式落盘；不支持则 Blob 合并内存下载（≤1.5GB）。
+    // 网页内多线程（分块 Range）下载。
+    // 1) HEAD(?direct=1) 拿大小 + R2 公开 URL；2) 分块并行拉取，直连 R2 CDN 边缘节点；
+    // 3) 优先 File System Access API 流式落盘；不支持则 Blob 合并内存下载（≤1.5GB）。
+    // 直连 R2 绕过 Worker 代理延迟和 Service Worker 拦截，速度与 aria2 相近。
     // 计数在"真正开始下载"时发一次 HEAD(?dl=1)，取消保存对话框不计。
+    // R2 无 CORS 或直连失败时自动回退 Worker 代理。
     async function multiThreadDownload() {
       if (_dl.active) return;
-      // 1) HEAD 拿大小（不计）
-      var head;
-      try { head = await fetch(fileUrl, { method: 'HEAD' }); }
+      // 1) HEAD 拿大小 + R2 直连 URL（不计下载次数）
+      var head, directUrl = null;
+      try { head = await fetch(fileUrl + '&direct=1', { method: 'HEAD' }); }
       catch (e) { window.location.href = fileUrl + '&dl=1'; return; }
       var total = parseInt(head.headers.get('Content-Length') || '0', 10);
       var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
+      directUrl = head.headers.get('X-Direct-Url');
       // 小文件直接原生下载（计一次数）
       if (!total || total < 1024 * 1024) {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
@@ -989,7 +993,8 @@ export async function onRequestGet(context) {
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
-      // 3) 分块
+      // 3) 分块 — 使用直连 URL（绕过 Worker/SW），不可用时回退 Worker 代理
+      var fetchUrl = directUrl || fileUrl;
       var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
@@ -1004,7 +1009,11 @@ export async function onRequestGet(context) {
         return (async function () {
           while (queue.length) {
             var r = queue.shift();
-            var res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            var res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            // 直连失败（如 R2 未配 CORS）→ 回退 Worker 代理
+            if (!res.ok && fetchUrl !== fileUrl) {
+              res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            }
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
             // 流式读取：每收到一个网络 chunk 就更新进度
             var reader = res.body.getReader();
