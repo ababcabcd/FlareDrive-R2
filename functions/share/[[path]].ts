@@ -928,19 +928,26 @@ export async function onRequestGet(context) {
         el = document.createElement('div');
         el.id = 'dlProgress';
         el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(17,17,17,.85);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;z-index:9999;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.3)';
+        el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+          '<span class="dl-label">' + (label || '下载中') + ' <b class="dl-pct">' + Math.round(pct) + '%</b></span>' +
+          '<button title="取消下载" style="background:none;border:1px solid rgba(255,255,255,.25);color:#9ca3af;border-radius:4px;cursor:pointer;font-size:12px;padding:2px 6px;line-height:1">✕</button>' +
+          '</div>' +
+          '<progress value="' + Math.min(99, pct) + '" max="100" style="width:100%"></progress>';
+        el.querySelector('button').addEventListener('click', function () {
+          if (_dl.ctrl) _dl.ctrl.abort();
+        });
         document.body.appendChild(el);
+      } else {
+        var labelEl = el.querySelector('.dl-label');
+        var pctEl = el.querySelector('.dl-pct');
+        var progressEl = el.querySelector('progress');
+        if (labelEl) labelEl.textContent = (label || '下载中') + ' ';
+        if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+        if (progressEl) progressEl.value = Math.min(99, pct);
       }
-      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
-        '<span>' + (label || '下载中') + ' <b>' + Math.round(pct) + '%</b></span>' +
-        '<button onclick="cancelDl()" title="取消下载" style="background:none;border:1px solid rgba(255,255,255,.25);color:#9ca3af;border-radius:4px;cursor:pointer;font-size:12px;padding:2px 6px;line-height:1">✕</button>' +
-        '</div>' +
-        '<progress value="' + Math.min(99, pct) + '" max="100" style="width:100%"></progress>';
       el.style.display = 'block';
     }
     function hideDlProgress() { var el = document.getElementById('dlProgress'); if (el) el.style.display = 'none'; }
-    function cancelDl() {
-      if (_dl.ctrl) _dl.ctrl.abort();
-    }
 
     // 网页内多线程（分块 Range）下载：HEAD 拿大小，并行拉取多区间。
     // 优先 File System Access API 流式落盘；不支持则 Blob 合并内存下载（≤1.5GB）。
