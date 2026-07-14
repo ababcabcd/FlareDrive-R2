@@ -262,6 +262,8 @@ export async function onRequestGet(context) {
       padding: 32px;
       max-width: 420px;
       width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
       box-shadow: 0 20px 60px rgba(0,0,0,.3);
     }
     
@@ -304,6 +306,68 @@ export async function onRequestGet(context) {
       font-size: 12px;
       color: #9ca3af;
       margin-top: 4px;
+    }
+    
+    .aria2-help-toggle {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px dashed #d1d5db;
+      border-radius: 8px;
+      background: #f9fafb;
+      font-size: 14px;
+      color: #6b7280;
+      cursor: pointer;
+      text-align: left;
+      transition: all .2s;
+    }
+    
+    .aria2-help-toggle:hover {
+      border-color: #059669;
+      color: #059669;
+      background: #f0fdf4;
+    }
+    
+    .aria2-help-content {
+      margin-top: 12px;
+      padding: 16px;
+      background: #f9fafb;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #374151;
+    }
+    
+    .aria2-help-content h4 {
+      font-size: 13px;
+      color: #1f2937;
+      margin: 14px 0 6px;
+    }
+    
+    .aria2-help-content h4:first-child {
+      margin-top: 0;
+    }
+    
+    .aria2-help-content code {
+      display: block;
+      padding: 8px 12px;
+      background: #1f2937;
+      color: #10b981;
+      border-radius: 6px;
+      font-size: 12px;
+      margin: 4px 0;
+      word-break: break-all;
+      user-select: all;
+    }
+    
+    .aria2-help-content .hint {
+      font-size: 12px;
+      color: #9ca3af;
+      margin: 4px 0 0;
+    }
+    
+    .aria2-help-content a {
+      color: #059669;
+    }
     }
     
     .aria2-toast {
@@ -665,7 +729,7 @@ export async function onRequestGet(context) {
         var s = localStorage.getItem('aria2_settings');
         if (s) return JSON.parse(s);
       } catch(e) {}
-      return { host: 'localhost', port: 16800, secret: '' };
+      return { protocol: 'http', host: 'localhost', port: 16800, secret: '' };
     }
 
     function saveAria2Settings(settings) {
@@ -690,9 +754,29 @@ export async function onRequestGet(context) {
       overlay.id = 'aria2SettingsOverlay';
       overlay.innerHTML = '<div class="aria2-settings">' +
         '<h3>Aria2 RPC 设置</h3>' +
+        '<div class="field"><label>协议</label><select id="aria2Proto" style="width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:15px;outline:none;box-sizing:border-box">' +
+          '<option value="http"' + (s.protocol === 'http' ? ' selected' : '') + '>HTTP</option>' +
+          '<option value="https"' + (s.protocol === 'https' ? ' selected' : '') + '>HTTPS</option>' +
+        '</select><div class="hint">HTTPS 页面请求 HTTP 地址会被浏览器拦截，Motrix 等默认 HTTP 需加反向代理</div></div>' +
         '<div class="field"><label>RPC 主机</label><input id="aria2Host" value="' + s.host + '" placeholder="localhost"></div>' +
         '<div class="field"><label>RPC 端口</label><input id="aria2Port" type="number" value="' + s.port + '" placeholder="16800"></div>' +
         '<div class="field"><label>RPC 密钥</label><input id="aria2Secret" type="password" value="' + s.secret + '" placeholder="（可选）"><div class="hint">留空表示无密钥</div></div>' +
+        '<button class="aria2-help-toggle" onclick="var c=this.nextElementSibling;c.style.display=c.style.display===\'none\'?\'block\':\'none\'">📖 Motrix / HTTP Aria2 如何连接？</button>' +
+        '<div class="aria2-help-content" style="display:none">' +
+          '<h4>1. 安装 Caddy（macOS）</h4>' +
+          '<code>brew install caddy</code>' +
+          '<p class="hint">其他系统：<a href="https://caddyserver.com/download" target="_blank">caddyserver.com/download</a></p>' +
+          '<h4>2. 启动 HTTPS 反代</h4>' +
+          '<code>caddy reverse-proxy --from :16801 --to :16800</code>' +
+          '<p class="hint">将 16801 端口（HTTPS）转发到 Motrix 的 16800（HTTP）</p>' +
+          '<h4>3. 信任证书（可选）</h4>' +
+          '<code>caddy trust</code>' +
+          '<p class="hint">Mac 上首次运行可能需要，避免浏览器证书警告</p>' +
+          '<h4>4. 在此页面配置</h4>' +
+          '<p class="hint">协议选 <b>HTTPS</b>，主机 <b>localhost</b>，端口 <b>16801</b>，填入 Motrix 的 RPC 密钥</p>' +
+          '<h4>5. 终端保持运行</h4>' +
+          '<p class="hint">Caddy 在终端前台运行，按 Ctrl+C 停止。如需后台运行，加 <code style="display:inline;padding:2px 6px;margin:0">caddy reverse-proxy --from :16801 --to :16800 &</code></p>' +
+        '</div>' +
         '<div class="btn-row" style="margin-top:8px">' +
           '<button class="copy-btn" onclick="hideAria2Settings()" style="flex:1">取消</button>' +
           '<button class="download-btn" onclick="saveAria2Config()" style="flex:1;margin-left:8px">保存</button>' +
@@ -708,10 +792,11 @@ export async function onRequestGet(context) {
     }
 
     function saveAria2Config() {
+      var protocol = document.getElementById('aria2Proto').value;
       var host = document.getElementById('aria2Host').value.trim() || 'localhost';
       var port = parseInt(document.getElementById('aria2Port').value, 10) || 16800;
       var secret = document.getElementById('aria2Secret').value.trim();
-      saveAria2Settings({ host: host, port: port, secret: secret });
+      saveAria2Settings({ protocol: protocol, host: host, port: port, secret: secret });
       hideAria2Settings();
       aria2Toast('Aria2 设置已保存', 'success');
     }
@@ -719,7 +804,8 @@ export async function onRequestGet(context) {
     async function sendToAria2() {
       var s = loadAria2Settings();
       var url = location.origin + fileUrl + '&dl=1';
-      var rpcUrl = 'http://' + s.host + ':' + s.port + '/jsonrpc';
+      var proto = s.protocol || 'http';
+      var rpcUrl = proto + '://' + s.host + ':' + s.port + '/jsonrpc';
       var params = s.secret ? ['token:' + s.secret, [url], {}] : [[url], {}];
 
       aria2Toast('正在发送到 Aria2...');
@@ -737,7 +823,11 @@ export async function onRequestGet(context) {
           aria2Toast('已发送到 Aria2! GID: ' + data.result, 'success');
         }
       } catch(e) {
-        aria2Toast('无法连接 Aria2 (' + s.host + ':' + s.port + ')，请检查设置', 'error');
+        if (location.protocol === 'https:' && proto === 'http') {
+          aria2Toast('HTTPS 页面无法访问 HTTP Aria2，请在设置中切换到 HTTPS，并配置反向代理', 'error');
+        } else {
+          aria2Toast('无法连接 Aria2 (' + proto + '://' + s.host + ':' + s.port + ')，请检查设置', 'error');
+        }
       }
     }
     // ===== Aria2 结束 =====
