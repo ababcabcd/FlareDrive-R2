@@ -213,6 +213,122 @@ export async function onRequestGet(context) {
       transform: translateY(0);
     }
     
+    .aria2-btn {
+      padding: 14px 24px;
+      background: white;
+      color: #059669;
+      border: 2px solid #059669;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex: 1;
+    }
+    
+    .aria2-btn:hover {
+      background: #059669;
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(5, 150, 105, 0.3);
+    }
+    
+    .aria2-btn:active {
+      transform: translateY(0);
+    }
+    
+    .container.media .aria2-btn {
+      flex: 0 0 auto;
+    }
+    
+    .aria2-settings-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .aria2-settings {
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    }
+    
+    .aria2-settings h3 {
+      font-size: 20px;
+      color: #1f2937;
+      margin-bottom: 24px;
+      margin-top: 0;
+    }
+    
+    .aria2-settings .field {
+      margin-bottom: 16px;
+      text-align: left;
+    }
+    
+    .aria2-settings .field label {
+      display: block;
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    
+    .aria2-settings .field input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 15px;
+      outline: none;
+      transition: border-color .2s;
+      box-sizing: border-box;
+    }
+    
+    .aria2-settings .field input:focus {
+      border-color: #059669;
+    }
+    
+    .aria2-settings .hint {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+    
+    .aria2-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      background: rgba(17,17,17,.85);
+      color: #fff;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 14px;
+      z-index: 9999;
+      box-shadow: 0 8px 24px rgba(0,0,0,.3);
+      animation: toastIn .3s ease;
+    }
+    
+    .aria2-toast.success { background: rgba(5,150,105,.9); }
+    .aria2-toast.error { background: rgba(239,68,68,.9); }
+    
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+    
     .btn-icon {
       font-size: 20px;
     }
@@ -473,6 +589,14 @@ export async function onRequestGet(context) {
               '<button class="copy-btn" onclick="copyLink()">' +
                 '<span class="btn-icon">📋</span><span>复制链接</span>' +
               '</button>' +
+            '</div>' +
+            '<div class="btn-row" style="margin-top:12px">' +
+              '<button class="aria2-btn" onclick="sendToAria2()">' +
+                '<span class="btn-icon">🚀</span><span>发送到 Aria2</span>' +
+              '</button>' +
+              '<button class="aria2-btn" onclick="showAria2Settings()" style="flex:0 0 auto;min-width:48px;padding:14px 16px">' +
+                '<span class="btn-icon">⚙️</span>' +
+              '</button>' +
             '</div>';
           // 视频预取：只在用户主动点击视频后才启动（click once），
           // autoplay 不应触发预取，避免浪费带宽和 R2 请求。
@@ -497,6 +621,14 @@ export async function onRequestGet(context) {
               '</button>' +
               '<button class="copy-btn" onclick="copyLink()">' +
                 '<span class="btn-icon">📋</span><span>复制链接</span>' +
+              '</button>' +
+            '</div>' +
+            '<div class="btn-row" style="margin-top:12px">' +
+              '<button class="aria2-btn" onclick="sendToAria2()">' +
+                '<span class="btn-icon">🚀</span><span>发送到 Aria2</span>' +
+              '</button>' +
+              '<button class="aria2-btn" onclick="showAria2Settings()" style="flex:0 0 auto;min-width:48px;padding:14px 16px">' +
+                '<span class="btn-icon">⚙️</span>' +
               '</button>' +
             '</div>';
         }
@@ -526,6 +658,89 @@ export async function onRequestGet(context) {
         prompt('请手动复制链接:', url);
       }
     }
+
+    // ===== Aria2 RPC =====
+    function loadAria2Settings() {
+      try {
+        var s = localStorage.getItem('aria2_settings');
+        if (s) return JSON.parse(s);
+      } catch(e) {}
+      return { host: 'localhost', port: 16800, secret: '' };
+    }
+
+    function saveAria2Settings(settings) {
+      try { localStorage.setItem('aria2_settings', JSON.stringify(settings)); } catch(e) {}
+    }
+
+    function aria2Toast(msg, type) {
+      var el = document.getElementById('aria2Toast');
+      if (el) el.remove();
+      el = document.createElement('div');
+      el.id = 'aria2Toast';
+      el.className = 'aria2-toast' + (type ? ' ' + type : '');
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(function() { if (el.parentNode) el.remove(); }, 3000);
+    }
+
+    function showAria2Settings() {
+      var s = loadAria2Settings();
+      var overlay = document.createElement('div');
+      overlay.className = 'aria2-settings-overlay';
+      overlay.id = 'aria2SettingsOverlay';
+      overlay.innerHTML = '<div class="aria2-settings">' +
+        '<h3>Aria2 RPC 设置</h3>' +
+        '<div class="field"><label>RPC 主机</label><input id="aria2Host" value="' + s.host + '" placeholder="localhost"></div>' +
+        '<div class="field"><label>RPC 端口</label><input id="aria2Port" type="number" value="' + s.port + '" placeholder="16800"></div>' +
+        '<div class="field"><label>RPC 密钥</label><input id="aria2Secret" type="password" value="' + s.secret + '" placeholder="（可选）"><div class="hint">留空表示无密钥</div></div>' +
+        '<div class="btn-row" style="margin-top:8px">' +
+          '<button class="copy-btn" onclick="hideAria2Settings()" style="flex:1">取消</button>' +
+          '<button class="download-btn" onclick="saveAria2Config()" style="flex:1;margin-left:8px">保存</button>' +
+        '</div>' +
+      '</div>';
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', function(e) { if (e.target === overlay) hideAria2Settings(); });
+    }
+
+    function hideAria2Settings() {
+      var el = document.getElementById('aria2SettingsOverlay');
+      if (el) el.remove();
+    }
+
+    function saveAria2Config() {
+      var host = document.getElementById('aria2Host').value.trim() || 'localhost';
+      var port = parseInt(document.getElementById('aria2Port').value, 10) || 16800;
+      var secret = document.getElementById('aria2Secret').value.trim();
+      saveAria2Settings({ host: host, port: port, secret: secret });
+      hideAria2Settings();
+      aria2Toast('Aria2 设置已保存', 'success');
+    }
+
+    async function sendToAria2() {
+      var s = loadAria2Settings();
+      var url = location.origin + fileUrl + '&dl=1';
+      var rpcUrl = 'http://' + s.host + ':' + s.port + '/jsonrpc';
+      var params = s.secret ? ['token:' + s.secret, [url], {}] : [[url], {}];
+
+      aria2Toast('正在发送到 Aria2...');
+
+      try {
+        var res = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 'flaredrive', method: 'aria2.addUri', params: params })
+        });
+        var data = await res.json();
+        if (data.error) {
+          aria2Toast('Aria2 错误: ' + (data.error.message || JSON.stringify(data.error)), 'error');
+        } else {
+          aria2Toast('已发送到 Aria2! GID: ' + data.result, 'success');
+        }
+      } catch(e) {
+        aria2Toast('无法连接 Aria2 (' + s.host + ':' + s.port + ')，请检查设置', 'error');
+      }
+    }
+    // ===== Aria2 结束 =====
 
     var _dl = { active: false, ctrl: null, writable: null };
 
