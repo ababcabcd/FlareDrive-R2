@@ -767,15 +767,15 @@ export async function onRequestGet(context) {
           '<code>brew install caddy</code>' +
           '<p class="hint">其他系统：<a href="https://caddyserver.com/download" target="_blank">caddyserver.com/download</a></p>' +
           '<h4>2. 启动 HTTPS 反代</h4>' +
-          '<code>caddy reverse-proxy --from :16801 --to :16800</code>' +
-          '<p class="hint">将 16801 端口（HTTPS）转发到 Motrix 的 16800（HTTP）</p>' +
+          '<code>caddy reverse-proxy --from https://localhost:16801 --to http://localhost:16800</code>' +
+          '<p class="hint">必须用 https:// 前缀，否则 Caddy 只启 HTTP 不启 TLS</p>' +
           '<h4>3. 信任证书（可选）</h4>' +
           '<code>caddy trust</code>' +
           '<p class="hint">Mac 上首次运行可能需要，避免浏览器证书警告</p>' +
           '<h4>4. 在此页面配置</h4>' +
           '<p class="hint">协议选 <b>HTTPS</b>，主机 <b>localhost</b>，端口 <b>16801</b>，填入 Motrix 的 RPC 密钥</p>' +
           '<h4>5. 终端保持运行</h4>' +
-          '<p class="hint">Caddy 在终端前台运行，按 Ctrl+C 停止。如需后台运行，加 <code style="display:inline;padding:2px 6px;margin:0">caddy reverse-proxy --from :16801 --to :16800 &</code></p>' +
+          '<p class="hint">Caddy 在终端前台运行，按 Ctrl+C 停止。如需后台运行，加 <code style="display:inline;padding:2px 6px;margin:0">caddy reverse-proxy --from https://localhost:16801 --to http://localhost:16800 &</code></p>' +
         '</div>' +
         '<div class="btn-row" style="margin-top:8px">' +
           '<button class="copy-btn" onclick="hideAria2Settings()" style="flex:1">取消</button>' +
