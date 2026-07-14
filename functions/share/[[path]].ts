@@ -154,9 +154,10 @@ export async function onRequestGet(context) {
       gap: 12px;
     }
     
-    .container.media .download-btn,
-    .container.media .copy-btn {
+    .copy-link-btn {
       flex: 0 0 auto;
+      min-width: auto;
+      padding: 14px 18px;
     }
     
     .download-btn {
@@ -715,8 +716,8 @@ export async function onRequestGet(context) {
               '<button class="download-btn" onclick="downloadFile()">' +
                 '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
               '</button>' +
-              '<button class="copy-btn" onclick="copyLink()">' +
-                '<span class="btn-icon">📋</span><span>复制链接</span>' +
+              '<button class="copy-btn copy-link-btn" onclick="copyLink(this)">' +
+                '<span class="btn-icon">📋</span>' +
               '</button>' +
             '</div>' +
             '<div class="btn-row" style="margin-top:12px">' +
@@ -748,8 +749,8 @@ export async function onRequestGet(context) {
               '<button class="download-btn" onclick="downloadFile()">' +
                 '<span class="btn-icon">⬇️</span><span>下载文件</span>' +
               '</button>' +
-              '<button class="copy-btn" onclick="copyLink()">' +
-                '<span class="btn-icon">📋</span><span>复制链接</span>' +
+              '<button class="copy-btn copy-link-btn" onclick="copyLink(this)">' +
+                '<span class="btn-icon">📋</span>' +
               '</button>' +
             '</div>' +
             '<div class="btn-row" style="margin-top:12px">' +
@@ -782,16 +783,30 @@ export async function onRequestGet(context) {
       multiThreadDownload();
     }
 
-    function copyLink() {
+    function copyLink(btn) {
       var url = location.origin + fileUrl + '&dl=1';
+      var icon = btn.querySelector('.btn-icon');
+      var orig = icon.textContent;
+      var done = function (ok) {
+        icon.textContent = ok ? '✓' : '✗';
+        btn.style.pointerEvents = 'none';
+        if (ok) { btn.style.borderColor = '#10b981'; btn.style.color = '#10b981'; }
+        else { btn.style.borderColor = '#ef4444'; btn.style.color = '#ef4444'; }
+        setTimeout(function () {
+          icon.textContent = orig;
+          btn.style.pointerEvents = '';
+          btn.style.borderColor = '';
+          btn.style.color = '';
+        }, 1500);
+      };
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(function() {
-          alert('下载链接已复制到粘贴板');
-        }).catch(function() {
-          prompt('复制失败，请手动复制:', url);
-        });
+        navigator.clipboard.writeText(url).then(function () { done(true); }).catch(function () { done(false); });
       } else {
-        prompt('请手动复制链接:', url);
+        var ta = document.createElement('textarea');
+        ta.value = url; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(true); } catch (e) { done(false); }
+        document.body.removeChild(ta);
       }
     }
 
@@ -919,15 +934,21 @@ export async function onRequestGet(context) {
         el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(17,17,17,.85);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;z-index:9999;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.3)';
         document.body.appendChild(el);
       }
-      el.innerHTML = '<div style="margin-bottom:8px">' + (label || '下载中') + ' <b>' + Math.round(pct) + '%</b></div>' +
-        '<progress value="' + pct + '" max="100" style="width:100%"></progress>';
+      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+        '<span>' + (label || '下载中') + ' <b>' + Math.round(pct) + '%</b></span>' +
+        '<button onclick="cancelDl()" title="取消下载" style="background:none;border:1px solid rgba(255,255,255,.25);color:#9ca3af;border-radius:4px;cursor:pointer;font-size:12px;padding:2px 6px;line-height:1">✕</button>' +
+        '</div>' +
+        '<progress value="' + Math.min(99, pct) + '" max="100" style="width:100%"></progress>';
       el.style.display = 'block';
     }
     function hideDlProgress() { var el = document.getElementById('dlProgress'); if (el) el.style.display = 'none'; }
+    function cancelDl() {
+      if (_dl.ctrl) _dl.ctrl.abort();
+    }
 
-    // 网页内多线程（分块 Range）下载：HEAD 拿大小，并行拉取多区间，
-    // 通过 File System Access API 流式落盘（大文件不占满内存）；不支持则回退原生下载。
-    // 计数在“真正开始下载”时发一次 HEAD(?dl=1)，取消保存对话框不计。
+    // 网页内多线程（分块 Range）下载：HEAD 拿大小，并行拉取多区间。
+    // 优先 File System Access API 流式落盘；不支持则 Blob 合并内存下载（≤1.5GB）。
+    // 计数在"真正开始下载"时发一次 HEAD(?dl=1)，取消保存对话框不计。
     async function multiThreadDownload() {
       if (_dl.active) return;
       // 1) HEAD 拿大小（不计）
@@ -936,41 +957,53 @@ export async function onRequestGet(context) {
       catch (e) { window.location.href = fileUrl + '&dl=1'; return; }
       var total = parseInt(head.headers.get('Content-Length') || '0', 10);
       var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
-      // 小文件或不支持 File System Access：原生下载（计一次数）
-      if (!total || total < 1024 * 1024 || typeof window.showSaveFilePicker !== 'function') {
+      // 小文件直接原生下载（计一次数）
+      if (!total || total < 1024 * 1024) {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
         window.location.href = fileUrl + '&dl=1';
         return;
       }
+      // 2) 是否支持 File System Access（流式落盘，避免大文件占满内存）
       var writable = null;
-      try {
-        var handle = await window.showSaveFilePicker({ suggestedName: shareFileName });
-        writable = await handle.createWritable();
-      } catch (e) {
-        if (e && e.name === 'AbortError') return; // 用户取消保存：不计下载数
+      var useFS = typeof window.showSaveFilePicker === 'function';
+      if (useFS) {
+        try {
+          var handle = await window.showSaveFilePicker({ suggestedName: shareFileName });
+          writable = await handle.createWritable();
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // 用户取消保存：不计下载数
+          writable = null;
+        }
+      }
+      // 大文件且不支持流式落盘：内存风险，回退原生下载
+      var SAFE_LIMIT = 1.5 * 1024 * 1024 * 1024;
+      if (!writable && total > SAFE_LIMIT) {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
-        window.location.href = fileUrl + '&dl=1'; return;
+        window.location.href = fileUrl + '&dl=1';
+        return;
       }
       // 开始下载：计一次数
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
+      // 3) 分块
       var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
-      var chunk = Math.ceil(total / threads);
+      var chunkSize = Math.ceil(total / threads);
       var ranges = [];
       for (var i = 0; i < threads; i++) {
-        var s = i * chunk, e = Math.min(total - 1, s + chunk - 1);
+        var s = i * chunkSize, e = Math.min(total - 1, s + chunkSize - 1);
         if (s > e) break;
         ranges.push({ s: s, e: e, index: i });
       }
       var received = 0, writeChain = Promise.resolve(), queue = ranges.slice();
+      var buffers = writable ? null : new Array(ranges.length);
       function worker() {
         return (async function () {
           while (queue.length) {
             var r = queue.shift();
             var res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
-            // 流式读取：每收到一个网络 chunk 就更新进度，避免整段 arrayBuffer 完成前进度卡在 0%
+            // 流式读取：每收到一个网络 chunk 就更新进度
             var reader = res.body.getReader();
             var chunks = [];
             var chunkReceived = 0;
@@ -981,30 +1014,52 @@ export async function onRequestGet(context) {
               chunkReceived += result.value.length;
               received += result.value.length;
               var pct = total ? (received / total) * 100 : 0;
-              showDlProgress(pct, '下载 ' + shareFileName + ' ...');
+              showDlProgress(Math.min(99, pct), '下载 ' + shareFileName + ' ...');
             }
-            // 合并本分块并按顺序写入
+            // 合并本分块
             var buf = new Uint8Array(chunkReceived);
             var offset = 0;
             for (var i = 0; i < chunks.length; i++) {
               buf.set(chunks[i], offset);
               offset += chunks[i].length;
             }
-            // 顺序写：每个写操作挂在前一个之后，保证字节顺序；用 IIFE 捕获当前 buf 避免闭包串块
-            (function (b) { writeChain = writeChain.then(function () { return writable.write(b); }); })(buf);
+            if (writable) {
+              // 顺序写：每个写操作挂在前一个之后，保证字节顺序
+              (function (b) { writeChain = writeChain.then(function () { return writable.write(b); }); })(buf);
+            } else {
+              buffers[r.index] = buf;
+            }
           }
         })();
       }
       try {
         await Promise.all(Array.from({ length: threads }, worker));
-        await writeChain;
-        await writable.close();
+        if (writable) {
+          await writeChain;
+          await writable.close();
+        } else {
+          var blob = new Blob(buffers, { type: contentType });
+          var objUrl = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = objUrl;
+          a.download = shareFileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(objUrl); }, 1000);
+        }
         showDlProgress(100, '下载完成: ' + shareFileName);
         setTimeout(hideDlProgress, 800);
       } catch (e) {
-        if (_dl.ctrl.signal.aborted) showDlProgress(0, '已取消下载');
-        else { console.error('多线程下载失败', e); try { await writable.close(); } catch (_) {} window.location.href = fileUrl + '&dl=1'; }
-      } finally { _dl.active = false; }
+        if (_dl.ctrl.signal.aborted) {
+          showDlProgress(0, '已取消下载');
+          setTimeout(hideDlProgress, 800);
+        } else {
+          console.error('多线程下载失败', e);
+          if (writable) { try { await writable.close(); } catch (_) {} }
+          window.location.href = fileUrl + '&dl=1';
+        }
+      } finally { _dl.active = false; _dl.ctrl = null; }
     }
     
     function formatSize(size) {
