@@ -368,7 +368,6 @@ export async function onRequestGet(context) {
     .aria2-help-content a {
       color: #059669;
     }
-    }
     
     .aria2-toast {
       position: fixed;
@@ -781,7 +780,7 @@ export async function onRequestGet(context) {
         '</div>' +
       '</div>';
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function(e) { if (e.target === overlay) hideAria2Settings(); });
+      overlay.addEventListener('mousedown', function(e) { if (e.target === overlay) hideAria2Settings(); });
     }
 
     function toggleAria2Help(btn) {
