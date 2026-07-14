@@ -154,10 +154,10 @@ export async function onRequestGet(context) {
       gap: 12px;
     }
     
-    .copy-link-btn {
+    .btn-icon-only {
       flex: 0 0 auto;
-      min-width: auto;
-      padding: 14px 18px;
+      width: 52px;
+      padding: 14px 0;
     }
     
     .download-btn {
@@ -240,10 +240,6 @@ export async function onRequestGet(context) {
     
     .aria2-btn:active {
       transform: translateY(0);
-    }
-    
-    .container.media .aria2-btn {
-      flex: 0 0 auto;
     }
     
     .aria2-settings-overlay {
@@ -716,7 +712,7 @@ export async function onRequestGet(context) {
               '<button class="download-btn" onclick="downloadFile()">' +
                 '<span class="btn-icon">⬇️</span><span>下载' + label + '</span>' +
               '</button>' +
-              '<button class="copy-btn copy-link-btn" onclick="copyLink(this)">' +
+              '<button class="copy-btn btn-icon-only" onclick="copyLink(this)">' +
                 '<span class="btn-icon">📋</span>' +
               '</button>' +
             '</div>' +
@@ -724,7 +720,7 @@ export async function onRequestGet(context) {
               '<button class="aria2-btn" onclick="sendToAria2()">' +
                 '<span class="btn-icon">🚀</span><span>发送到 Aria2</span>' +
               '</button>' +
-              '<button class="aria2-btn" onclick="showAria2Settings()" style="flex:0 0 auto;min-width:48px;padding:14px 16px">' +
+              '<button class="aria2-btn btn-icon-only" onclick="showAria2Settings()">' +
                 '<span class="btn-icon">⚙️</span>' +
               '</button>' +
             '</div>';
@@ -749,7 +745,7 @@ export async function onRequestGet(context) {
               '<button class="download-btn" onclick="downloadFile()">' +
                 '<span class="btn-icon">⬇️</span><span>下载文件</span>' +
               '</button>' +
-              '<button class="copy-btn copy-link-btn" onclick="copyLink(this)">' +
+              '<button class="copy-btn btn-icon-only" onclick="copyLink(this)">' +
                 '<span class="btn-icon">📋</span>' +
               '</button>' +
             '</div>' +
@@ -757,7 +753,7 @@ export async function onRequestGet(context) {
               '<button class="aria2-btn" onclick="sendToAria2()">' +
                 '<span class="btn-icon">🚀</span><span>发送到 Aria2</span>' +
               '</button>' +
-              '<button class="aria2-btn" onclick="showAria2Settings()" style="flex:0 0 auto;min-width:48px;padding:14px 16px">' +
+              '<button class="aria2-btn btn-icon-only" onclick="showAria2Settings()">' +
                 '<span class="btn-icon">⚙️</span>' +
               '</button>' +
             '</div>';
