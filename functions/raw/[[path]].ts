@@ -11,9 +11,10 @@ async function fetchWithEdgeCache(
   pubUrl: string,
   reqHeaders: Headers,
   ctx: any,
+  explicitRange?: string | null,
 ): Promise<Response> {
   const cache = typeof caches !== 'undefined' ? caches.default : undefined;
-  const range = reqHeaders.get("Range") || "";
+  const range = explicitRange ?? (reqHeaders.get("Range") || "");
 
   // 有边缘缓存时，优先查缓存
   if (cache) {
@@ -25,9 +26,16 @@ async function fetchWithEdgeCache(
       if (cached) return cached;
     } catch (_) { /* dev 环境 fallthrough */ }
 
+    // 显式设置 Range 头，防止 new Headers(request.headers) 在某些 Workers
+    // 运行时中丢失 Range 导致 R2 返回 200 全量文件而非 206
+    const proxyHeaders = new Headers(reqHeaders);
+    if (range && !proxyHeaders.has("Range")) {
+      proxyHeaders.set("Range", range);
+    }
+
     const response = await fetch(new Request(pubUrl, {
       method: "GET",
-      headers: reqHeaders,
+      headers: proxyHeaders,
       redirect: "follow",
     }));
 
@@ -50,9 +58,13 @@ async function fetchWithEdgeCache(
   }
 
   // 无边缘缓存（dev / 非标准环境）：直接回源
+  const proxyHeaders = new Headers(reqHeaders);
+  if (range && !proxyHeaders.has("Range")) {
+    proxyHeaders.set("Range", range);
+  }
   return fetch(new Request(pubUrl, {
     method: "GET",
-    headers: reqHeaders,
+    headers: proxyHeaders,
     redirect: "follow",
   }));
 }
@@ -164,7 +176,7 @@ export async function onRequestHead(context: any) {
   const reqUrl = new URL(context.request.url);
   if (reqUrl.searchParams.get("direct") === "1" && context.env?.["PUBURL"]) {
     headers.set("X-Direct-Url", url);
-    corsHeaders.set("Access-Control-Expose-Headers", `Content-Range, Accept-Ranges, Content-Length, Content-Type, X-Direct-Url`);
+    headers.set("Access-Control-Expose-Headers", `Content-Range, Accept-Ranges, Content-Length, Content-Type, X-Direct-Url`);
   }
 
   // 兜底：修正 R2 未识别的 MIME 类型
@@ -215,6 +227,7 @@ export async function onRequestGet(context: any) {
   const isMediaExt = mediaExtensions.includes(fileExt);
   const isMediaRequest = (secFetchDest === 'video' || secFetchDest === 'audio')
     || isMediaExt;
+  const rangeHeader = request.headers.get('Range');
   const reqHeaders = new Headers(request.headers);
   reqHeaders.delete('host');
   reqHeaders.delete('origin');
@@ -225,7 +238,7 @@ export async function onRequestGet(context: any) {
   // 夹紧操作都可能导致响应不完整，进而丢失 moov/duration，进度条显示 --:--。
   // 浏览器有完整的 MP4 解析逻辑，应信任其发出的 Range 请求。
 
-  const response = await fetchWithEdgeCache(url, reqHeaders, context);
+  const response = await fetchWithEdgeCache(url, reqHeaders, context, rangeHeader);
 
   const headers = new Headers(response.headers);
   const corsHeaders = buildCorsHeaders();

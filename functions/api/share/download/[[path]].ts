@@ -7,9 +7,10 @@ async function fetchWithEdgeCache(
   pubUrl: string,
   reqHeaders: Headers,
   ctx: any,
+  explicitRange?: string | null,
 ): Promise<Response> {
   const cache = typeof caches !== 'undefined' ? caches.default : undefined;
-  const range = reqHeaders.get("Range") || "";
+  const range = explicitRange ?? (reqHeaders.get("Range") || "");
 
   if (cache) {
     const cacheKeyUrl = range
@@ -20,9 +21,16 @@ async function fetchWithEdgeCache(
       if (cached) return cached;
     } catch (_) { /* dev */ }
 
+    // 显式设置 Range 头，防止 new Headers(request.headers) 在某些 Workers
+    // 运行时中丢失 Range 导致 R2 返回 200 全量文件而非 206
+    const proxyHeaders = new Headers(reqHeaders);
+    if (range && !proxyHeaders.has("Range")) {
+      proxyHeaders.set("Range", range);
+    }
+
     const response = await fetch(new Request(pubUrl, {
       method: "GET",
-      headers: reqHeaders,
+      headers: proxyHeaders,
       redirect: "follow",
     }));
 
@@ -43,9 +51,13 @@ async function fetchWithEdgeCache(
     return response;
   }
 
+  const proxyHeaders = new Headers(reqHeaders);
+  if (range && !proxyHeaders.has("Range")) {
+    proxyHeaders.set("Range", range);
+  }
   return fetch(new Request(pubUrl, {
     method: "GET",
-    headers: reqHeaders,
+    headers: proxyHeaders,
     redirect: "follow",
   }));
 }
@@ -224,8 +236,11 @@ export async function onRequestHead(context: any) {
     // 合并 CORS 头
     const corsHeaders = buildCorsHeaders();
     corsHeaders.forEach((v, k) => headers.set(k, v));
-    // 确保 X-Direct-Url 也能被 JS 读到
-    corsHeaders.set("Access-Control-Expose-Headers", `Content-Range, Accept-Ranges, Content-Length, Content-Type, X-Direct-Url`);
+
+    // 直连下载时有自定义 header，需要暴露给 JS 读取
+    if (headers.has("X-Direct-Url")) {
+      headers.set("Access-Control-Expose-Headers", `Content-Range, Accept-Ranges, Content-Length, Content-Type, X-Direct-Url`);
+    }
 
     return new Response(null, { status: 200, headers });
   } catch (e: any) {
@@ -317,7 +332,7 @@ export async function onRequestGet(context: any) {
 
     // 其他请求代理到 PUBURL，确保 CORS 头完整并设置正确的下载文件名
 
-    const response = await fetchWithEdgeCache(pubUrl, reqHeaders, context);
+    const response = await fetchWithEdgeCache(pubUrl, reqHeaders, context, rangeHeader);
 
     const headers = new Headers(response.headers);
     const corsHeaders = buildCorsHeaders();
