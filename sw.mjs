@@ -322,8 +322,26 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 跨域请求（如直连 R2 CDN 的多线程下载）不拦截，交给浏览器原生处理
+  // mt=1 标记：多线程下载通过 Worker 代理，跳过 SW 缓存层直连
+  if (url.searchParams.has('mt')) {
+    event.respondWith(fetch(event.request.url, {
+      method: event.request.method,
+      headers: event.request.headers,
+    }));
+    return;
+  }
+
+  // 跨域 R2 直连请求：SW 代理并注入 CORS 头，让页面能读取 R2 响应。
+  // SW 的 fetch() 不受 CORS 限制，拿到完整响应后包装 withCors() 返回给页面。
+  // 仅拦截带 Range 头的下载请求，非 Range（图片等）交给浏览器原生处理。
   if (url.origin !== self.location.origin) {
+    const rangeHeader = event.request.headers.get('Range');
+    if (rangeHeader) {
+      event.respondWith(
+        fetch(event.request.url, { method: event.request.method, headers: event.request.headers })
+          .then(r => withCors(r))
+      );
+    }
     return;
   }
 
@@ -346,11 +364,6 @@ self.addEventListener('fetch', (event) => {
   return;
 }
 
-  // 仅拦截带 Range 头的请求（视频/音频流式播放 + 预取），其余请求直接透传。
-  // 无 Range 请求（图片、下载导航、Safari 初始探测等）不通过 fetch(event.request)
-  // 透传：Safari SW 中 event.request 可能带有特定 mode/credentials 导致
-  // fetch() 返回 body=null 的 opaque response，引发 MEDIA_ERR_SRC_NOT_SUPPORTED。
-  // 使用 fetch(url, opts) 手动构造请求，确保得到完整可读的响应。
   const rangeHeader = event.request.headers.get('Range');
   if (!rangeHeader) {
     event.respondWith(fetch(event.request.url, {

@@ -993,13 +993,8 @@ export async function onRequestGet(context) {
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
-      // 3) 分块 — 使用直连 URL（绕过 Worker/SW），不可用时回退 Worker 代理
-      // 预检探测：发一次小 Range GET 判断直连是否可用（HEAD 不触发 CORS 预检，Range 才触发）
-      var fetchUrl = directUrl || fileUrl;
-      if (directUrl && fetchUrl !== fileUrl) {
-        try { var probe = await fetch(directUrl, { headers: { Range: 'bytes=0-0' } }); if (!probe.ok) fetchUrl = fileUrl; }
-        catch (e) { fetchUrl = fileUrl; }
-      }
+      // 3) 分块 — 优先直连 R2（SW 自动注入 CORS 头），不可用时回退 Worker 代理
+      var fetchUrl = directUrl || (fileUrl + '&mt=1');
       var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];

@@ -874,13 +874,8 @@ export default {
         return;
       }
 
-      // 3) 分块 — 使用直连 URL（绕过 Worker/SW），不可用时回退 Worker 代理
-      // 预检探测：发一次小 Range GET 判断直连是否可用（HEAD 不触发 CORS 预检，Range 才触发）
-      let fetchUrl = directUrl || url;
-      if (directUrl && fetchUrl !== url) {
-        try { const probe = await fetch(directUrl, { headers: { Range: 'bytes=0-0' } }); if (!probe.ok) fetchUrl = url; }
-        catch (e) { fetchUrl = url; }
-      }
+      // 3) 分块 — 优先直连 R2（SW 自动注入 CORS 头），不可用时回退 Worker API
+      const fetchUrl = directUrl || (url + '&mt=1');
       const threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
