@@ -953,12 +953,13 @@ export async function onRequestGet(context) {
     function hideDlProgress() { var el = document.getElementById('dlProgress'); if (el) el.style.display = 'none'; }
 
     // 小文件单线程 fetch 下载（不触发浏览器原生下载器）
-    async function singleThreadDownload(total, contentType) {
+    async function singleThreadDownload(total, contentType, directUrl) {
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
       _dl.active = true; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName);
       try {
-        var res = await fetch(apiOrigin + fileUrl + '&mt=1', { signal: _dl.ctrl.signal });
+        var fetchUrl = directUrl || (apiOrigin + fileUrl + '&mt=1');
+        var res = await fetch(fetchUrl, { signal: _dl.ctrl.signal });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var reader = res.body.getReader();
         var chunks = [], received = 0;
@@ -998,10 +999,11 @@ export async function onRequestGet(context) {
       catch (e) { window.location.href = fileUrl + '&dl=1'; return; }
       var total = parseInt(head.headers.get('Content-Length') || '0', 10);
       var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
+      var directUrl = head.headers.get('X-Direct-Url');
       // 小文件：单线程 fetch 下载，不跳转页面触发原生下载器
       if (!total || total < 1024 * 1024) {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
-        singleThreadDownload(total, contentType);
+        singleThreadDownload(total, contentType, directUrl);
         return;
       }
       // 2) 是否支持 File System Access（流式落盘，避免大文件占满内存）
@@ -1027,9 +1029,9 @@ export async function onRequestGet(context) {
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName);
-      // 3) 分块 — 跨域 API 绕过 Service Worker，直连 Worker → R2
+      // 3) 分块 — 优先 R2 直连，直连不可用时回退 Worker 代理
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
-      var fetchUrl = apiOrigin + fileUrl + '&mt=1';
+      var fetchUrl = directUrl || (apiOrigin + fileUrl + '&mt=1');
       var threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];

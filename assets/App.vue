@@ -824,14 +824,15 @@ export default {
     },
 
     // 小文件单线程 fetch 下载（不触发浏览器原生下载器）
-    async singleThreadDownload(url, displayName, contentType, authHeaders) {
+    async singleThreadDownload(url, displayName, contentType, authHeaders, directUrl) {
       const apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
       this.downloadProgress = 0;
       this.downloadProgressLabel = `下载 ${displayName}`;
       const ctrl = new AbortController();
       this.downloadAbortCtrl = ctrl;
       try {
-        const res = await fetch(apiOrigin + url + '&mt=1', {
+        const fetchUrl = directUrl || (apiOrigin + url + '&mt=1');
+        const res = await fetch(fetchUrl, {
           method: 'GET',
           headers: Object.assign({}, authHeaders),
           signal: ctrl.signal,
@@ -889,10 +890,12 @@ export default {
       // 1) HEAD 获取文件大小、类型与 R2 直连 URL
       let total = 0;
       let contentType = 'application/octet-stream';
+      let directUrl = null;
       try {
         const head = await this.apiFetch(url + '&direct=1', { method: 'HEAD' });
         total = parseInt(head.headers.get('Content-Length') || '0', 10);
         contentType = head.headers.get('Content-Type') || contentType;
+        directUrl = head.headers.get('X-Direct-Url');
       } catch (e) {
         console.error('HEAD 失败，回退到原生下载', e);
         this.showToast('获取文件信息失败，请使用右键菜单的「下载」');
@@ -900,7 +903,7 @@ export default {
       }
       // 小文件：不需要多线程，通过 fetch 下载后触发保存（不打开原生下载弹窗）
       if (!total || total < 1024 * 1024) {
-        await this.singleThreadDownload(url, displayName, contentType, authHeaders);
+        await this.singleThreadDownload(url, displayName, contentType, authHeaders, directUrl);
         return;
       }
 
@@ -924,9 +927,9 @@ export default {
         return;
       }
 
-      // 3) 分块 — 跨域 API 绕过 Service Worker，直连 Worker → R2
+      // 3) 分块 — 优先 R2 直连，直连不可用时回退 Worker 代理
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
-      const fetchUrl = apiOrigin + url + '&mt=1';
+      const fetchUrl = directUrl || (apiOrigin + url + '&mt=1');
       const threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
