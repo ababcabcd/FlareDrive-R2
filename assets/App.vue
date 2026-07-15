@@ -875,7 +875,12 @@ export default {
       }
 
       // 3) 分块 — 使用直连 URL（绕过 Worker/SW），不可用时回退 Worker 代理
-      const fetchUrl = directUrl || url;
+      // 预检探测：发一次 HEAD 判断直连是否可用（CORS 未配时回退 Worker，避免 8 条报错）
+      let fetchUrl = directUrl || url;
+      if (directUrl && fetchUrl !== url) {
+        try { const probe = await fetch(directUrl, { method: 'HEAD' }); if (!probe.ok) fetchUrl = url; }
+        catch (e) { fetchUrl = url; }
+      }
       const threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
@@ -902,33 +907,12 @@ export default {
       };
 
       const worker = async (r) => {
-        // 直连 R2：CORS 错误会直接抛 TypeError，先 try 再回退 Worker 代理
-        let res;
-        try {
-          res = await fetch(fetchUrl, {
-            method: 'GET',
-            headers: { Range: `bytes=${r.start}-${r.end}` },
-            signal: ctrl.signal,
-          });
-        } catch (e) {
-          if (fetchUrl !== url) {
-            res = await this.apiFetch(url, {
-              method: 'GET',
-              headers: { ...authHeaders, Range: `bytes=${r.start}-${r.end}` },
-              signal: ctrl.signal,
-            });
-          } else {
-            throw e;
-          }
-        }
-        // HTTP 错误也回退
-        if (!res.ok && fetchUrl !== url) {
-          res = await this.apiFetch(url, {
-            method: 'GET',
-            headers: { ...authHeaders, Range: `bytes=${r.start}-${r.end}` },
-            signal: ctrl.signal,
-          });
-        }
+        // 预检已确定直连或代理，直接请求
+        const res = await fetch(fetchUrl, {
+          method: 'GET',
+          headers: { Range: `bytes=${r.start}-${r.end}` },
+          signal: ctrl.signal,
+        });
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${r.index} 返回 ${res.status}`);
         }

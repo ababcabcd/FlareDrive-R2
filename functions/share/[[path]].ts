@@ -994,7 +994,12 @@ export async function onRequestGet(context) {
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
       // 3) 分块 — 使用直连 URL（绕过 Worker/SW），不可用时回退 Worker 代理
+      // 预检探测：发一次 HEAD 判断直连是否可用（CORS 未配时回退 Worker，避免 8 条报错）
       var fetchUrl = directUrl || fileUrl;
+      if (directUrl && fetchUrl !== fileUrl) {
+        try { var probe = await fetch(directUrl, { method: 'HEAD' }); if (!probe.ok) fetchUrl = fileUrl; }
+        catch (e) { fetchUrl = fileUrl; }
+      }
       var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
@@ -1009,21 +1014,8 @@ export async function onRequestGet(context) {
         return (async function () {
           while (queue.length) {
             var r = queue.shift();
-            // 直连 R2：CORS 错误会直接抛 TypeError，先 try 再回退 Worker 代理
-            var res;
-            try {
-              res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
-            } catch (e) {
-              if (fetchUrl !== fileUrl) {
-                res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
-              } else {
-                throw e;
-              }
-            }
-            // HTTP 错误也回退
-            if (!res.ok && fetchUrl !== fileUrl) {
-              res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
-            }
+            // 预检已确定直连或代理，直接请求
+            var res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
             // 流式读取：每收到一个网络 chunk 就更新进度
             var reader = res.body.getReader();
