@@ -1014,8 +1014,12 @@ export async function onRequestGet(context) {
         return (async function () {
           while (queue.length) {
             var r = queue.shift();
-            // 预检已确定直连或代理，直接请求
-            var res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            var res;
+            try {
+              res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            } catch (e) {
+              throw new Error('分块 ' + r.index + ' 请求失败: ' + (e.message || e));
+            }
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
             // 流式读取：每收到一个网络 chunk 就更新进度
             var reader = res.body.getReader();

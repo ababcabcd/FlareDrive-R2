@@ -907,12 +907,17 @@ export default {
       };
 
       const worker = async (r) => {
-        // 预检已确定直连或代理，直接请求
-        const res = await fetch(fetchUrl, {
-          method: 'GET',
-          headers: { Range: `bytes=${r.start}-${r.end}` },
-          signal: ctrl.signal,
-        });
+        // 预检已确定直连或代理，带 try-catch 兜底网络异常
+        let res;
+        try {
+          res = await fetch(fetchUrl, {
+            method: 'GET',
+            headers: { Range: `bytes=${r.start}-${r.end}` },
+            signal: ctrl.signal,
+          });
+        } catch (e) {
+          throw new Error(`分块 ${r.index} 请求失败: ${e.message || e}`);
+        }
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${r.index} 返回 ${res.status}`);
         }
