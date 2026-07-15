@@ -52,7 +52,7 @@
       <button class="upload-cancel-btn" title="取消上传" @click="cancelUpload">✕</button>
     </div>
     <div v-if="downloadProgress !== null" class="upload-progress-bar">
-      <span class="upload-progress-label">{{ downloadProgressLabel || '下载中' }}</span>
+      <span class="upload-progress-label">{{ downloadProgressLabel || '下载中' }} <em>{{ Math.round(downloadProgress) }}%</em></span>
       <progress :value="downloadProgress" max="100"></progress>
       <button class="upload-cancel-btn" title="取消下载" @click="cancelDownload">✕</button>
     </div>
@@ -817,6 +817,53 @@ export default {
       return `/api/children/_fd_?name=${encodeURIComponent(prefix)}`;
     },
 
+    // 小文件单线程 fetch 下载（不触发浏览器原生下载器）
+    async singleThreadDownload(url, displayName, contentType, authHeaders) {
+      const apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
+      this.downloadProgress = 0;
+      this.downloadProgressLabel = `下载 ${displayName}`;
+      const ctrl = new AbortController();
+      this.downloadAbortCtrl = ctrl;
+      try {
+        const res = await fetch(apiOrigin + url + '&mt=1', {
+          method: 'GET',
+          headers: Object.assign({}, authHeaders),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+        const total = parseInt(res.headers.get('Content-Length') || '0', 10);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          this.downloadProgress = total ? Math.min(99, (received / total) * 100) : 99;
+        }
+        const blob = new Blob(chunks, { type: contentType || 'application/octet-stream' });
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objUrl;
+        a.download = displayName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+        this.downloadProgress = 100;
+        this.downloadProgressLabel = `下载完成: ${displayName}`;
+      } catch (e) {
+        if (!ctrl.signal.aborted) {
+          console.error(e);
+          this.showToast('下载失败: ' + (e.message || '网络错误'));
+        }
+      } finally {
+        this.downloadAbortCtrl = null;
+        setTimeout(() => { this.downloadProgress = null; }, 600);
+      }
+    },
+
     // 网页内多线程（分块 Range）下载：
     // 1) HEAD(?direct=1) 拿文件大小/类型 + R2 公开 URL；2) 按大小决定线程数(2-8)；
     // 3) 分块并行拉取，直连 R2 CDN 边缘节点；
@@ -842,12 +889,12 @@ export default {
         contentType = head.headers.get('Content-Type') || contentType;
       } catch (e) {
         console.error('HEAD 失败，回退到原生下载', e);
-        window.open(url + '&dl=1', '_blank');
+        this.showToast('获取文件信息失败，请使用右键菜单的「下载」');
         return;
       }
-      // 小文件直接原生下载即可
+      // 小文件：不需要多线程，通过 fetch 下载后触发保存（不打开原生下载弹窗）
       if (!total || total < 1024 * 1024) {
-        window.open(url + '&dl=1', '_blank');
+        await this.singleThreadDownload(url, displayName, contentType, authHeaders);
         return;
       }
 
@@ -867,8 +914,7 @@ export default {
       // 大文件且不支持流式落盘：内存风险，回退原生单线程下载
       const SAFE_LIMIT = 1.5 * 1024 * 1024 * 1024;
       if (!writable && total > SAFE_LIMIT) {
-        this.showToast('文件过大，浏览器内存受限，已改用原生下载');
-        window.open(url + '&dl=1', '_blank');
+        this.showToast('文件过大，请使用右键菜单的「下载」');
         return;
       }
 
@@ -897,7 +943,7 @@ export default {
       const updateProgress = () => {
         const pct = total ? (received / total) * 100 : 0;
         this.downloadProgress = Math.min(99, pct);
-        this.downloadProgressLabel = `下载 ${displayName} ... ${Math.round(pct)}%`;
+        this.downloadProgressLabel = `下载 ${displayName}`;
       };
 
       const worker = async (r) => {
@@ -982,8 +1028,7 @@ export default {
           this.downloadProgressLabel = '已取消下载';
         } else {
           console.error('多线程下载失败', e);
-          this.showToast('多线程下载失败，已回退到原生下载');
-          window.open(url + '&dl=1', '_blank');
+          this.showToast('多线程下载失败: ' + (e.message || '网络错误'));
         }
         if (writable) { try { await writable.close(); } catch (_) {} }
       } finally {

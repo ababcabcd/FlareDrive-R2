@@ -949,6 +949,38 @@ export async function onRequestGet(context) {
     }
     function hideDlProgress() { var el = document.getElementById('dlProgress'); if (el) el.style.display = 'none'; }
 
+    // 小文件单线程 fetch 下载（不触发浏览器原生下载器）
+    async function singleThreadDownload(total, contentType) {
+      var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
+      _dl.active = true; _dl.ctrl = new AbortController();
+      showDlProgress(0, '下载 ' + shareFileName);
+      try {
+        var res = await fetch(apiOrigin + fileUrl + '&mt=1', { signal: _dl.ctrl.signal });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var reader = res.body.getReader();
+        var chunks = [], received = 0;
+        while (true) {
+          var result = await reader.read();
+          if (result.done) break;
+          chunks.push(result.value);
+          received += result.value.length;
+          showDlProgress(Math.min(99, (received / (total || 1)) * 100), '下载 ' + shareFileName);
+        }
+        var blob = new Blob(chunks, { type: contentType || 'application/octet-stream' });
+        var objUrl = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = objUrl; a.download = shareFileName;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(objUrl); }, 1000);
+        showDlProgress(100, '下载完成: ' + shareFileName);
+        setTimeout(hideDlProgress, 800);
+      } catch (e) {
+        if (!_dl.ctrl.signal.aborted) {
+          window.location.href = fileUrl + '&dl=1';
+        }
+      } finally { _dl.active = false; _dl.ctrl = null; }
+    }
+
     // 网页内多线程（分块 Range）下载。
     // 1) HEAD(?direct=1) 拿大小 + R2 公开 URL；2) 分块并行拉取，直连 R2 CDN 边缘节点；
     // 3) 优先 File System Access API 流式落盘；不支持则 Blob 合并内存下载（≤1.5GB）。
@@ -963,10 +995,10 @@ export async function onRequestGet(context) {
       catch (e) { window.location.href = fileUrl + '&dl=1'; return; }
       var total = parseInt(head.headers.get('Content-Length') || '0', 10);
       var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
-      // 小文件直接原生下载（计一次数）
+      // 小文件：单线程 fetch 下载，不跳转页面触发原生下载器
       if (!total || total < 1024 * 1024) {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
-        window.location.href = fileUrl + '&dl=1';
+        singleThreadDownload(total, contentType);
         return;
       }
       // 2) 是否支持 File System Access（流式落盘，避免大文件占满内存）
@@ -991,7 +1023,7 @@ export async function onRequestGet(context) {
       // 开始下载：计一次数
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
-      showDlProgress(0, '下载 ' + shareFileName + ' ...');
+      showDlProgress(0, '下载 ' + shareFileName);
       // 3) 分块 — 跨域 API 绕过 Service Worker，直连 Worker → R2
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
       var fetchUrl = apiOrigin + fileUrl + '&mt=1';
@@ -1027,7 +1059,7 @@ export async function onRequestGet(context) {
               chunkReceived += result.value.length;
               received += result.value.length;
               var pct = total ? (received / total) * 100 : 0;
-              showDlProgress(Math.min(99, pct), '下载 ' + shareFileName + ' ...');
+              showDlProgress(Math.min(99, pct), '下载 ' + shareFileName);
             }
             // 合并本分块
             var buf = new Uint8Array(chunkReceived);
@@ -1070,7 +1102,8 @@ export async function onRequestGet(context) {
         } else {
           console.error('多线程下载失败', e);
           if (writable) { try { await writable.close(); } catch (_) {} }
-          window.location.href = fileUrl + '&dl=1';
+          showDlProgress(0, '下载失败，请重试');
+          setTimeout(hideDlProgress, 2000);
         }
       } finally { _dl.active = false; _dl.ctrl = null; }
     }
