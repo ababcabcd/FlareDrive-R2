@@ -932,18 +932,9 @@ export default {
         return;
       }
 
-      // 3) 分块 — 优先 R2 直连，直连不可用时回退 Worker 代理
+      // 3) 分块 — 优先 R2 直连，不可用时自动回退 Worker 代理
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
-      // 预检 R2 直连 CORS 可用性（跨域 Range 请求需响应带 Allow-Origin）
-      let useDirect = false;
-      if (directUrl) {
-        try {
-          const probe = await fetch(directUrl, { method: 'GET', headers: { Range: 'bytes=0-0' } });
-          useDirect = probe.ok || probe.status === 206;
-        } catch (_) { /* CORS / network → fall back */ }
-      }
-      const fetchUrl = useDirect ? directUrl : (apiOrigin + url + '&mt=1');
-      const needAuth = !useDirect;
+      let directFailed = false;
       const threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
@@ -970,18 +961,27 @@ export default {
       };
 
       const worker = async (r) => {
-        // 预检已确定直连或代理，带 try-catch 兜底网络异常
+        // 优先 R2 直连（快），失败则回退 Worker 代理
         let res;
-        const workerHeaders = { Range: `bytes=${r.start}-${r.end}` };
-        if (needAuth) Object.assign(workerHeaders, authHeaders);
-        try {
-          res = await fetch(fetchUrl, {
-            method: 'GET',
-            headers: workerHeaders,
-            signal: ctrl.signal,
-          });
-        } catch (e) {
-          throw new Error(`分块 ${r.index} 请求失败: ${e.message || e}`);
+        if (directUrl && !directFailed) {
+          try {
+            res = await fetch(directUrl, {
+              method: 'GET',
+              headers: { Range: `bytes=${r.start}-${r.end}` },
+              signal: ctrl.signal,
+            });
+          } catch (_) { directFailed = true; }
+        }
+        if (!res) {
+          try {
+            res = await fetch(apiOrigin + url + '&mt=1', {
+              method: 'GET',
+              headers: Object.assign({ Range: `bytes=${r.start}-${r.end}` }, authHeaders),
+              signal: ctrl.signal,
+            });
+          } catch (e) {
+            throw new Error(`分块 ${r.index} 请求失败: ${e.message || e}`);
+          }
         }
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${r.index} 返回 ${res.status}`);

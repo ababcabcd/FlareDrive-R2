@@ -1034,17 +1034,9 @@ export async function onRequestGet(context) {
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName);
-      // 3) 分块 — 优先 R2 直连，直连不可用时回退 Worker 代理
+      // 3) 分块 — 优先 R2 直连，不可用时自动回退 Worker 代理
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
-      // 预检 R2 直连 CORS 可用性
-      var useDirect = false;
-      if (directUrl) {
-        try {
-          var probe = await fetch(directUrl, { method: 'GET', headers: { Range: 'bytes=0-0' } });
-          useDirect = probe.ok || probe.status === 206;
-        } catch (_) { /* CORS / network → fall back */ }
-      }
-      var fetchUrl = useDirect ? directUrl : (apiOrigin + fileUrl + '&mt=1');
+      var directFailed = false;
       var threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
@@ -1055,15 +1047,31 @@ export async function onRequestGet(context) {
       }
       var received = 0, writeChain = Promise.resolve(), queue = ranges.slice();
       var buffers = writable ? null : new Array(ranges.length);
+      // 需要捕获 directUrl 的引用
+      var _directUrl = directUrl;
       function worker() {
         return (async function () {
           while (queue.length) {
             var r = queue.shift();
             var res;
-            try {
-              res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
-            } catch (e) {
-              throw new Error('分块 ' + r.index + ' 请求失败: ' + (e.message || e));
+            // 优先 R2 直连，失败回退 Worker 代理
+            if (_directUrl && !directFailed) {
+              try {
+                res = await fetch(_directUrl, {
+                  headers: { Range: 'bytes=' + r.s + '-' + r.e },
+                  signal: _dl.ctrl.signal
+                });
+              } catch (_) { directFailed = true; }
+            }
+            if (!res) {
+              try {
+                res = await fetch(apiOrigin + fileUrl + '&mt=1', {
+                  headers: { Range: 'bytes=' + r.s + '-' + r.e },
+                  signal: _dl.ctrl.signal
+                });
+              } catch (e) {
+                throw new Error('分块 ' + r.index + ' 请求失败: ' + (e.message || e));
+              }
             }
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
             // 流式读取：每收到一个网络 chunk 就更新进度
