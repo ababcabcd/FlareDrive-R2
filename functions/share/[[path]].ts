@@ -958,12 +958,11 @@ export async function onRequestGet(context) {
     async function multiThreadDownload() {
       if (_dl.active) return;
       // 1) HEAD 拿大小 + R2 直连 URL（不计下载次数）
-      var head, directUrl = null;
+      var head;
       try { head = await fetch(fileUrl + '&direct=1', { method: 'HEAD' }); }
       catch (e) { window.location.href = fileUrl + '&dl=1'; return; }
       var total = parseInt(head.headers.get('Content-Length') || '0', 10);
       var contentType = head.headers.get('Content-Type') || 'application/octet-stream';
-      directUrl = head.headers.get('X-Direct-Url');
       // 小文件直接原生下载（计一次数）
       if (!total || total < 1024 * 1024) {
         try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
@@ -993,8 +992,8 @@ export async function onRequestGet(context) {
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
-      // 3) 分块 — 优先直连 R2（SW 自动注入 CORS 头），不可用时回退 Worker 代理
-      var fetchUrl = directUrl || (fileUrl + '&mt=1');
+      // 3) 分块 — Worker 代理（同源无 CORS，Worker/R2 同在 CF 边缘，内部网络零延迟）
+      var fetchUrl = fileUrl + '&mt=1';
       var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];

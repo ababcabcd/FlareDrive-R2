@@ -322,7 +322,8 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // mt=1 标记：多线程下载通过 Worker 代理，跳过 SW 缓存层直连
+  // mt=1 标记：多线程下载请求，绕过 SW 缓存层直连 Worker API
+  // Worker 和 R2 同在 CF 边缘节点，内部网络转发几乎零延迟
   if (url.searchParams.has('mt')) {
     event.respondWith(fetch(event.request.url, {
       method: event.request.method,
@@ -331,17 +332,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 跨域 R2 直连请求：SW 代理并注入 CORS 头，让页面能读取 R2 响应。
-  // SW 的 fetch() 不受 CORS 限制，拿到完整响应后包装 withCors() 返回给页面。
-  // 仅拦截带 Range 头的下载请求，非 Range（图片等）交给浏览器原生处理。
+  // 跨域请求（如直连 R2 CDN）不拦截，交给浏览器原生处理
   if (url.origin !== self.location.origin) {
-    const rangeHeader = event.request.headers.get('Range');
-    if (rangeHeader) {
-      event.respondWith(
-        fetch(event.request.url, { method: event.request.method, headers: event.request.headers })
-          .then(r => withCors(r))
-      );
-    }
     return;
   }
 

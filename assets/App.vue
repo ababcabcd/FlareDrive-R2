@@ -836,12 +836,10 @@ export default {
       // 1) HEAD 获取文件大小、类型与 R2 直连 URL
       let total = 0;
       let contentType = 'application/octet-stream';
-      let directUrl = null;
       try {
         const head = await this.apiFetch(url + '&direct=1', { method: 'HEAD' });
         total = parseInt(head.headers.get('Content-Length') || '0', 10);
         contentType = head.headers.get('Content-Type') || contentType;
-        directUrl = head.headers.get('X-Direct-Url');
       } catch (e) {
         console.error('HEAD 失败，回退到原生下载', e);
         window.open(url + '&dl=1', '_blank');
@@ -874,8 +872,8 @@ export default {
         return;
       }
 
-      // 3) 分块 — 优先直连 R2（SW 自动注入 CORS 头），不可用时回退 Worker API
-      const fetchUrl = directUrl || (url + '&mt=1');
+      // 3) 分块 — Worker API（同源无 CORS，Worker/R2 同在 CF 边缘，内部网络零延迟）
+      const fetchUrl = url + '&mt=1';
       const threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
