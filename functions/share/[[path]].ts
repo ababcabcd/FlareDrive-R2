@@ -992,8 +992,9 @@ export async function onRequestGet(context) {
       try { await fetch(fileUrl + '&dl=1', { method: 'HEAD' }); } catch (_) {}
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
-      // 3) 分块 — Worker 代理（同源无 CORS，Worker/R2 同在 CF 边缘，内部网络零延迟）
-      var fetchUrl = fileUrl + '&mt=1';
+      // 3) 分块 — 跨域 API 绕过 Service Worker，直连 Worker → R2
+      var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
+      var fetchUrl = apiOrigin + fileUrl + '&mt=1';
       var threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
