@@ -47,12 +47,18 @@
       :style="{ backgroundImage: `url('${backgroundImageUrl}')` }"
   >
     <div v-if="uploadProgress !== null" class="upload-progress-bar">
-      <span class="upload-progress-label">{{ uploadProgressLabel || '上传中' }} <em>{{ Math.round(uploadProgress) }}%</em></span>
+      <div class="upload-progress-label">
+        <span class="progress-text">{{ uploadProgressLabel || '上传中' }}</span>
+        <em class="progress-pct">{{ Math.round(uploadProgress) }}%</em>
+      </div>
       <progress :value="uploadProgress" max="100"></progress>
       <button class="upload-cancel-btn" title="取消上传" @click="cancelUpload">✕</button>
     </div>
     <div v-if="downloadProgress !== null" class="upload-progress-bar">
-      <span class="upload-progress-label">{{ downloadProgressLabel || '下载中' }} <em>{{ Math.round(downloadProgress) }}%</em></span>
+      <div class="upload-progress-label">
+        <span class="progress-text">{{ downloadProgressLabel || '下载中' }}</span>
+        <em class="progress-pct">{{ Math.round(downloadProgress) }}%</em>
+      </div>
       <progress :value="downloadProgress" max="100"></progress>
       <button class="upload-cancel-btn" title="取消下载" @click="cancelDownload">✕</button>
     </div>

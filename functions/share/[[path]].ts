@@ -928,9 +928,12 @@ export async function onRequestGet(context) {
         el = document.createElement('div');
         el.id = 'dlProgress';
         el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(17,17,17,.85);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;z-index:9999;min-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.3)';
-        el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
-          '<span class="dl-label">' + (label || '下载中') + ' <b class="dl-pct">' + Math.round(pct) + '%</b></span>' +
-          '<button title="取消下载" style="background:none;border:1px solid rgba(255,255,255,.25);color:#9ca3af;border-radius:4px;cursor:pointer;font-size:12px;padding:2px 6px;line-height:1">✕</button>' +
+        el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">' +
+          '<span style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">' +
+            '<span class="dl-label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">' + (label || '下载中') + '</span>' +
+            '<b class="dl-pct" style="flex-shrink:0">' + Math.round(pct) + '%</b>' +
+          '</span>' +
+          '<button title="取消下载" style="flex-shrink:0;background:none;border:1px solid rgba(255,255,255,.25);color:#9ca3af;border-radius:4px;cursor:pointer;font-size:12px;padding:2px 6px;line-height:1">✕</button>' +
           '</div>' +
           '<progress value="' + Math.min(99, pct) + '" max="100" style="width:100%"></progress>';
         el.querySelector('button').addEventListener('click', function () {
@@ -941,7 +944,7 @@ export async function onRequestGet(context) {
         var labelEl = el.querySelector('.dl-label');
         var pctEl = el.querySelector('.dl-pct');
         var progressEl = el.querySelector('progress');
-        if (labelEl) labelEl.textContent = (label || '下载中') + ' ';
+        if (labelEl) labelEl.textContent = (label || '下载中');
         if (pctEl) pctEl.textContent = Math.round(pct) + '%';
         if (progressEl) progressEl.value = Math.min(99, pct);
       }

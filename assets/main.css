@@ -170,12 +170,25 @@ input[type="search"] {
 }
 
 .upload-progress-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: #fff;
   font-size: 12px;
+  padding-right: 28px; /* 给右侧取消按钮留位 */
+}
+
+.upload-progress-label .progress-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 28px; /* 给右侧取消按钮留位 */
+  min-width: 0;
+}
+
+.upload-progress-label .progress-pct {
+  flex-shrink: 0;
+  font-style: normal;
+  font-weight: 600;
 }
 
 .upload-cancel-btn {
