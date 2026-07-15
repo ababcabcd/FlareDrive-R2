@@ -902,12 +902,26 @@ export default {
       };
 
       const worker = async (r) => {
-        let res = await fetch(fetchUrl, {
-          method: 'GET',
-          headers: { Range: `bytes=${r.start}-${r.end}` },
-          signal: ctrl.signal,
-        });
-        // 直连失败（如 R2 未配 CORS）→ 回退 Worker 代理
+        // 直连 R2：CORS 错误会直接抛 TypeError，先 try 再回退 Worker 代理
+        let res;
+        try {
+          res = await fetch(fetchUrl, {
+            method: 'GET',
+            headers: { Range: `bytes=${r.start}-${r.end}` },
+            signal: ctrl.signal,
+          });
+        } catch (e) {
+          if (fetchUrl !== url) {
+            res = await this.apiFetch(url, {
+              method: 'GET',
+              headers: { ...authHeaders, Range: `bytes=${r.start}-${r.end}` },
+              signal: ctrl.signal,
+            });
+          } else {
+            throw e;
+          }
+        }
+        // HTTP 错误也回退
         if (!res.ok && fetchUrl !== url) {
           res = await this.apiFetch(url, {
             method: 'GET',

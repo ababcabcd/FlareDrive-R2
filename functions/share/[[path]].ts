@@ -1009,8 +1009,18 @@ export async function onRequestGet(context) {
         return (async function () {
           while (queue.length) {
             var r = queue.shift();
-            var res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
-            // 直连失败（如 R2 未配 CORS）→ 回退 Worker 代理
+            // 直连 R2：CORS 错误会直接抛 TypeError，先 try 再回退 Worker 代理
+            var res;
+            try {
+              res = await fetch(fetchUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+            } catch (e) {
+              if (fetchUrl !== fileUrl) {
+                res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
+              } else {
+                throw e;
+              }
+            }
+            // HTTP 错误也回退
             if (!res.ok && fetchUrl !== fileUrl) {
               res = await fetch(fileUrl, { headers: { Range: 'bytes=' + r.s + '-' + r.e }, signal: _dl.ctrl.signal });
             }
