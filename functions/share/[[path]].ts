@@ -958,8 +958,13 @@ export async function onRequestGet(context) {
       _dl.active = true; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName);
       try {
-        var fetchUrl = directUrl || (apiOrigin + fileUrl + '&mt=1');
-        var res = await fetch(fetchUrl, { signal: _dl.ctrl.signal });
+        var doFetch = function (u) { return fetch(u, { signal: _dl.ctrl.signal }); };
+        var res;
+        if (directUrl) {
+          try { res = await doFetch(directUrl); } catch (_) { res = await doFetch(apiOrigin + fileUrl + '&mt=1'); }
+        } else {
+          res = await doFetch(apiOrigin + fileUrl + '&mt=1');
+        }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var reader = res.body.getReader();
         var chunks = [], received = 0;
@@ -1031,7 +1036,15 @@ export async function onRequestGet(context) {
       showDlProgress(0, '下载 ' + shareFileName);
       // 3) 分块 — 优先 R2 直连，直连不可用时回退 Worker 代理
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
-      var fetchUrl = directUrl || (apiOrigin + fileUrl + '&mt=1');
+      // 预检 R2 直连 CORS 可用性
+      var useDirect = false;
+      if (directUrl) {
+        try {
+          var probe = await fetch(directUrl, { method: 'GET', headers: { Range: 'bytes=0-0' } });
+          useDirect = probe.ok || probe.status === 206;
+        } catch (_) { /* CORS / network → fall back */ }
+      }
+      var fetchUrl = useDirect ? directUrl : (apiOrigin + fileUrl + '&mt=1');
       var threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
