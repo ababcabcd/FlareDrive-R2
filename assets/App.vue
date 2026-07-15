@@ -986,25 +986,10 @@ export default {
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${r.index} 返回 ${res.status}`);
         }
-        // 流式读取：每收到一个网络 chunk 就更新进度，避免整段 arrayBuffer 完成前进度卡在 0%
-        const reader = res.body.getReader();
-        const chunks = [];
-        let chunkReceived = 0;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          chunkReceived += value.length;
-          received += value.length;
-          updateProgress();
-        }
-        // 合并本分块
-        const buf = new Uint8Array(chunkReceived);
-        let offset = 0;
-        for (const chunk of chunks) {
-          buf.set(chunk, offset);
-          offset += chunk.length;
-        }
+        // arrayBuffer() 一次完成整段下载，避免流式读取数百次 JS/浏览器跨边界调用
+        const buf = new Uint8Array(await res.arrayBuffer());
+        received += buf.byteLength;
+        updateProgress();
         if (writable) {
           // 顺序写：每个写操作挂在前一个之后，保证字节顺序
           writeChain = writeChain.then(() => writable.write(buf));

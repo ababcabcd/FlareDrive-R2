@@ -1074,26 +1074,11 @@ export async function onRequestGet(context) {
               }
             }
             if (res.status !== 206 && res.status !== 200) throw new Error('分块 ' + r.index + ' 返回 ' + res.status);
-            // 流式读取：每收到一个网络 chunk 就更新进度
-            var reader = res.body.getReader();
-            var chunks = [];
-            var chunkReceived = 0;
-            while (true) {
-              var result = await reader.read();
-              if (result.done) break;
-              chunks.push(result.value);
-              chunkReceived += result.value.length;
-              received += result.value.length;
-              var pct = total ? (received / total) * 100 : 0;
-              showDlProgress(Math.min(99, pct), '下载 ' + shareFileName);
-            }
-            // 合并本分块
-            var buf = new Uint8Array(chunkReceived);
-            var offset = 0;
-            for (var i = 0; i < chunks.length; i++) {
-              buf.set(chunks[i], offset);
-              offset += chunks[i].length;
-            }
+            // arrayBuffer() 一次完成整段下载，避免流式读取数百次 JS/浏览器跨边界调用
+            var buf = new Uint8Array(await res.arrayBuffer());
+            received += buf.byteLength;
+            var pct = total ? (received / total) * 100 : 0;
+            showDlProgress(Math.min(99, pct), '下载 ' + shareFileName);
             if (writable) {
               // 顺序写：每个写操作挂在前一个之后，保证字节顺序
               (function (b) { writeChain = writeChain.then(function () { return writable.write(b); }); })(buf);
