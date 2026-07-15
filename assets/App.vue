@@ -874,7 +874,7 @@ export default {
 
       // 3) 分块 — Worker API（同源无 CORS，Worker/R2 同在 CF 边缘，内部网络零延迟）
       const fetchUrl = url + '&mt=1';
-      const threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
+      const threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
       for (let i = 0; i < threads; i++) {

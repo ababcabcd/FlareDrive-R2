@@ -994,7 +994,7 @@ export async function onRequestGet(context) {
       showDlProgress(0, '下载 ' + shareFileName + ' ...');
       // 3) 分块 — Worker 代理（同源无 CORS，Worker/R2 同在 CF 边缘，内部网络零延迟）
       var fetchUrl = fileUrl + '&mt=1';
-      var threads = Math.max(2, Math.min(8, Math.ceil(total / (25 * 1024 * 1024))));
+      var threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
       for (var i = 0; i < threads; i++) {

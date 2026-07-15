@@ -330,9 +330,11 @@ export async function onRequestGet(context: any) {
     reqHeaders.delete('origin');
     reqHeaders.delete('referer');
 
-    // 其他请求代理到 PUBURL，确保 CORS 头完整并设置正确的下载文件名
-
-    const response = await fetchWithEdgeCache(pubUrl, reqHeaders, context, rangeHeader);
+    // mt 标记：多线程下载请求，跳过边缘缓存，直连 R2 流式转发以最大化吞吐
+    const isMt = url.searchParams.has('mt');
+    const response = isMt
+      ? await fetch(new Request(pubUrl, { method: 'GET', headers: reqHeaders, redirect: 'follow' }))
+      : await fetchWithEdgeCache(pubUrl, reqHeaders, context, rangeHeader);
 
     const headers = new Headers(response.headers);
     const corsHeaders = buildCorsHeaders();
