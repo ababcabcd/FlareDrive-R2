@@ -933,9 +933,10 @@ export default {
       }
 
       // 3) 分块 — 优先 R2 直连，不可用时自动回退 Worker 代理
+      // 减少并发线程数：太多 TCP 连接互相争抢带宽，每个都在慢启动阶段反而拖慢总速度
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
       let directFailed = false;
-      const threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
+      const threads = Math.max(2, Math.min(4, Math.ceil(total / (50 * 1024 * 1024))));
       const chunkSize = Math.ceil(total / threads);
       const ranges = [];
       for (let i = 0; i < threads; i++) {
@@ -945,14 +946,13 @@ export default {
         ranges.push({ start, end, index: i });
       }
 
-      // 4) 并行下载（带并发上限），按序写入/合并
+      // 4) 并行下载 + 并行写入（FileSystemWritableFileStream 支持按位置写入）
       this.downloadProgress = 0;
       this.downloadProgressLabel = `下载 ${displayName} ...`;
       const ctrl = new AbortController();
       this.downloadAbortCtrl = ctrl;
       let received = 0;
       const buffers = writable ? null : new Array(ranges.length);
-      let writeChain = Promise.resolve();
 
       const updateProgress = () => {
         const pct = total ? (received / total) * 100 : 0;
@@ -991,8 +991,8 @@ export default {
         received += buf.byteLength;
         updateProgress();
         if (writable) {
-          // 顺序写：每个写操作挂在前一个之后，保证字节顺序
-          writeChain = writeChain.then(() => writable.write(buf));
+          // 按位置写入磁盘（无需串行等待），WritableStream 内部处理并发
+          await writable.write({ type: 'write', position: r.start, data: buf });
         } else {
           buffers[r.index] = buf;
         }
@@ -1009,7 +1009,6 @@ export default {
         });
         await Promise.all(runners);
         if (writable) {
-          await writeChain;
           await writable.close();
         }
       };

@@ -1035,9 +1035,10 @@ export async function onRequestGet(context) {
       _dl.active = true; _dl.writable = writable; _dl.ctrl = new AbortController();
       showDlProgress(0, '下载 ' + shareFileName);
       // 3) 分块 — 优先 R2 直连，不可用时自动回退 Worker 代理
+      // 减少并发线程数：太多 TCP 连接互相争抢带宽，每个都在慢启动阶段反而拖慢总速度
       var apiOrigin = location.port ? location.origin : 'https://api.pan.253968.xyz';
       var directFailed = false;
-      var threads = Math.max(2, Math.min(6, Math.ceil(total / (25 * 1024 * 1024))));
+      var threads = Math.max(2, Math.min(4, Math.ceil(total / (50 * 1024 * 1024))));
       var chunkSize = Math.ceil(total / threads);
       var ranges = [];
       for (var i = 0; i < threads; i++) {
@@ -1045,7 +1046,7 @@ export async function onRequestGet(context) {
         if (s > e) break;
         ranges.push({ s: s, e: e, index: i });
       }
-      var received = 0, writeChain = Promise.resolve(), queue = ranges.slice();
+      var received = 0, queue = ranges.slice();
       var buffers = writable ? null : new Array(ranges.length);
       // 需要捕获 directUrl 的引用
       var _directUrl = directUrl;
@@ -1080,8 +1081,8 @@ export async function onRequestGet(context) {
             var pct = total ? (received / total) * 100 : 0;
             showDlProgress(Math.min(99, pct), '下载 ' + shareFileName);
             if (writable) {
-              // 顺序写：每个写操作挂在前一个之后，保证字节顺序
-              (function (b) { writeChain = writeChain.then(function () { return writable.write(b); }); })(buf);
+              // 按位置写入磁盘（无需串行等待），WritableStream 内部处理并发
+              await writable.write({ type: 'write', position: r.s, data: buf });
             } else {
               buffers[r.index] = buf;
             }
@@ -1091,7 +1092,6 @@ export async function onRequestGet(context) {
       try {
         await Promise.all(Array.from({ length: threads }, worker));
         if (writable) {
-          await writeChain;
           await writable.close();
         } else {
           var blob = new Blob(buffers, { type: contentType });
