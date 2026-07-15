@@ -322,8 +322,13 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
+  // 跨域请求（如直连 R2 CDN 的多线程下载）不拦截，交给浏览器原生处理
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   // 只拦截视频/下载端点
-if (!url.pathname.startsWith('/raw/') && !url.pathname.startsWith('/api/share/download/')) {
+  if (!url.pathname.startsWith('/raw/') && !url.pathname.startsWith('/api/share/download/')) {
   // 非目标路径：也必须调用 respondWith，否则 Safari 会因注册了 fetch 监听器
   // 而不自动 fallback 到网络，导致页面请求挂起。
   // 导航请求（mode=navigate）不能直接用 fetch(event.request)，浏览器不允许 SW
