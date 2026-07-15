@@ -913,8 +913,12 @@ export default {
       }
 
       // 2) 是否支持 File System Access（流式落盘，避免大文件占满内存）
+      // 在弹出文件保存对话框的同时预热 CDN 连接（TCP+TLS 握手），减少用户等待感
       let writable = null;
       const useFS = typeof window.showSaveFilePicker === 'function';
+      if (directUrl && useFS) {
+        fetch(directUrl, { headers: { Range: 'bytes=0-0' } }).catch(() => {});
+      }
       if (useFS) {
         try {
           const handle = await window.showSaveFilePicker({ suggestedName: displayName });
@@ -951,6 +955,7 @@ export default {
       this.downloadProgressLabel = `下载 ${displayName} ...`;
       const ctrl = new AbortController();
       this.downloadAbortCtrl = ctrl;
+      this._downloadWritable = writable;
       let received = 0;
       const buffers = writable ? null : new Array(ranges.length);
 
@@ -1021,6 +1026,7 @@ export default {
           await new Promise((res) => setTimeout(res, 400));
         } else {
           const blob = new Blob(buffers, { type: contentType });
+          buffers.length = 0; // 释放 Uint8Array 引用，允许 GC 提前回收
           const objUrl = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = objUrl;
@@ -1042,12 +1048,17 @@ export default {
         if (writable) { try { await writable.close(); } catch (_) {} }
       } finally {
         this.downloadAbortCtrl = null;
+        this._downloadWritable = null;
         setTimeout(() => { this.downloadProgress = null; }, 600);
       }
     },
 
     cancelDownload() {
       if (this.downloadAbortCtrl) this.downloadAbortCtrl.abort();
+      if (this._downloadWritable) {
+        try { this._downloadWritable.abort(); } catch (_) {}
+        this._downloadWritable = null;
+      }
       this.downloadProgress = null;
       this.downloadProgressLabel = '已取消下载';
       this.downloadAbortCtrl = null;

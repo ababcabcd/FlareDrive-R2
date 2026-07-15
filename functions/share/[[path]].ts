@@ -938,6 +938,7 @@ export async function onRequestGet(context) {
           '<progress value="' + Math.min(99, pct) + '" max="100" style="width:100%"></progress>';
         el.querySelector('button').addEventListener('click', function () {
           if (_dl.ctrl) _dl.ctrl.abort();
+          if (_dl.writable) { try { _dl.writable.abort(); } catch (_) {} }
         });
         document.body.appendChild(el);
       } else {
@@ -1012,8 +1013,12 @@ export async function onRequestGet(context) {
         return;
       }
       // 2) 是否支持 File System Access（流式落盘，避免大文件占满内存）
+      // 在弹出文件保存对话框的同时预热 CDN 连接（TCP+TLS 握手），减少用户等待感
       var writable = null;
       var useFS = typeof window.showSaveFilePicker === 'function';
+      if (directUrl && useFS) {
+        fetch(directUrl, { headers: { Range: 'bytes=0-0' } }).catch(function () {});
+      }
       if (useFS) {
         try {
           var handle = await window.showSaveFilePicker({ suggestedName: shareFileName });
@@ -1095,6 +1100,7 @@ export async function onRequestGet(context) {
           await writable.close();
         } else {
           var blob = new Blob(buffers, { type: contentType });
+          buffers.length = 0; // 释放 Uint8Array 引用，允许 GC 提前回收
           var objUrl = URL.createObjectURL(blob);
           var a = document.createElement('a');
           a.href = objUrl;
